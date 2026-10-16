@@ -50,8 +50,7 @@ html, body {
   touch-action: none;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  /* Soft CRT-ish lift so chunky pixels feel intentional */
-  filter: contrast(1.06) saturate(1.08);
+  background: #0a1218;
 }
 
 body.dragging #game { cursor: grabbing; }

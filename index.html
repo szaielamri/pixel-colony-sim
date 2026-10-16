@@ -62,18 +62,37 @@
       </div>
 
       <div class="time-controls">
-        <button type="button" id="hudToggle" class="mobile-only" title="Toggle panels">☰</button>
+        <button type="button" id="hudToggle" class="mobile-only" title="Map focus / show HUD">◉</button>
         <button type="button" id="logToggle" class="mobile-only" title="Chronicle">📜</button>
-        <button type="button" id="spectateBtn" class="on" title="Civilization runs itself — tap powers only when you want to intervene"><span class="btn-full">Spectate</span><span class="btn-short">Auto</span></button>
-        <button type="button" id="saveBtn" title="Save">Save</button>
-        <button type="button" id="restBtn" title="Send selected (or weary) villagers to sleep">Rest</button>
+        <button type="button" id="toolsToggle" class="mobile-only" title="Build &amp; land tools">🔧</button>
+        <button type="button" id="moreToggle" class="mobile-only" title="More controls">⋯</button>
+        <button type="button" id="spectateBtn" class="on desk-ctrl" title="Civilization runs itself — tap powers only when you want to intervene"><span class="btn-full">Spectate</span><span class="btn-short">Auto</span></button>
+        <button type="button" id="saveBtn" class="desk-ctrl" title="Save">Save</button>
+        <button type="button" id="restBtn" class="desk-ctrl" title="Send selected (or weary) villagers to sleep">Rest</button>
         <button type="button" id="pauseBtn" title="Space"><span class="btn-full">Pause</span><span class="btn-short">❚❚</span></button>
-        <button type="button" class="on" data-speed="1">1×</button>
-        <button type="button" data-speed="2">2×</button>
-        <button type="button" data-speed="3">3×</button>
+        <button type="button" class="on desk-ctrl speed-btn" data-speed="1">1×</button>
+        <button type="button" class="desk-ctrl speed-btn" data-speed="2">2×</button>
+        <button type="button" class="desk-ctrl speed-btn" data-speed="3">3×</button>
         <button type="button" id="muteBtn" title="Sound">♪</button>
       </div>
     </header>
+
+    <div id="moreSheet" class="hidden" aria-hidden="true">
+      <div class="more-card">
+        <p class="eyebrow">Controls</p>
+        <div class="choice-btns more-row">
+          <button type="button" id="moreSpectate">Auto</button>
+          <button type="button" id="moreSave">Save</button>
+          <button type="button" id="moreRest">Rest</button>
+        </div>
+        <div class="choice-btns more-row">
+          <button type="button" data-speed="1" class="on">1×</button>
+          <button type="button" data-speed="2">2×</button>
+          <button type="button" data-speed="3">3×</button>
+        </div>
+        <button type="button" id="moreClose">Done</button>
+      </div>
+    </div>
 
     <aside id="chronicle">
       <h2>Chronicle</h2>
@@ -159,6 +178,7 @@
     </div>
 
     <footer id="powers">
+      <button type="button" id="powersPeek" class="mobile-only powers-peek" title="Expand powers" aria-label="Powers">⌃ Powers</button>
       <div id="powerHint">Click a villager to look into their life.</div>
       <div id="noticeBar" class="hidden"></div>
       <div class="power-row">
