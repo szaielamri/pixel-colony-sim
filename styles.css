@@ -48,8 +48,8 @@ html, body {
   display: block;
   cursor: grab;
   touch-action: none;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+  /* Soft scaling keeps speech/UI readable; sprites stay sharp via integer zoom */
+  image-rendering: auto;
   background: #0a1218;
 }
 
