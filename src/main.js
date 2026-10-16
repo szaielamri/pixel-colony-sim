@@ -361,7 +361,7 @@ function bindInput() {
         const midX = (a.x + b.x) / 2;
         const midY = (a.y + b.y) / 2;
         const before = renderer.screenToWorld(midX, midY);
-        renderer.cam.zoom = Math.max(1.35, Math.min(5.2, renderer.cam.zoom * (d / pinchDist)));
+        renderer.cam.zoom = Math.max(2.2, Math.min(6.5, renderer.cam.zoom * (d / pinchDist)));
         const after = renderer.screenToWorld(midX, midY);
         renderer.cam.x += before.x - after.x;
         renderer.cam.y += before.y - after.y;
@@ -502,7 +502,7 @@ function bindInput() {
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     const before = renderer.screenToWorld(e.clientX, e.clientY);
-    renderer.cam.zoom = Math.max(1.35, Math.min(5.2, renderer.cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92)));
+    renderer.cam.zoom = Math.max(2.2, Math.min(6.5, renderer.cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92)));
     const after = renderer.screenToWorld(e.clientX, e.clientY);
     renderer.cam.x += before.x - after.x;
     renderer.cam.y += before.y - after.y;

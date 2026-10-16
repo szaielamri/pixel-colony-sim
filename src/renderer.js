@@ -158,15 +158,12 @@ function blit(ctx, rows, ox, oy, pal) {
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
-    // Chunky pixels: render at 1/pixelScale resolution, CSS scales up crisp
-    const coarse = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
-    // Phone: slightly chunkier pixels + lower zoom so more world fits on screen
-    this.pixelScale = coarse
-      ? Math.max(2, Math.min(3, Math.round((window.devicePixelRatio || 2) * 0.85) || 2))
-      : Math.max(2, Math.min(3, Math.round(window.devicePixelRatio || 2)));
-    // Avoid desynchronized — it blanks the canvas on some GPUs/browsers
+    const coarse = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 900;
+    // Full CSS resolution so people + speech stay readable (no heavy downscale)
+    this.pixelScale = 1;
     this.ctx = canvas.getContext("2d", { alpha: false }) || canvas.getContext("2d");
-    this.cam = { x: 0, y: 0, zoom: coarse ? 2.1 : 2.6 };
+    // Closer default zoom — sprites are tiny (~16px); need magnification to read
+    this.cam = { x: 0, y: 0, zoom: coarse ? 3.4 : 3.6 };
     this.terrain = null;
     this.terrainRev = -1;
     this.miniCache = null;
@@ -187,10 +184,9 @@ export class Renderer {
   resize() {
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
-    // Internal buffer smaller → bigger pixels, less fill-rate
-    const scale = this.pixelScale;
-    const w = Math.max(320, Math.floor(cssW / scale));
-    const h = Math.max(200, Math.floor(cssH / scale));
+    // 1 buffer pixel ≈ 1 CSS pixel (sharp text + clear characters)
+    const w = Math.max(320, Math.floor(cssW));
+    const h = Math.max(200, Math.floor(cssH));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
@@ -1346,45 +1342,73 @@ export class Renderer {
   }
 
   drawLabels(ctx, sim) {
-    // Smaller buffer → slightly larger UI type so it stays readable when scaled up
-    ctx.font = "600 11px Sora, sans-serif";
+    // Smooth text on top of pixel world
+    ctx.imageSmoothingEnabled = true;
     ctx.textAlign = "center";
-    ctx.imageSmoothingEnabled = false;
+    ctx.textBaseline = "middle";
+    const nameFont = "600 14px Sora, system-ui, sans-serif";
+    const speechFont = "600 13px Sora, system-ui, sans-serif";
     for (const v of sim.villagers) {
       const show = sim.selectedId === v.id || sim.hoveredId === v.id || v.speechT > 0;
       if (!show) continue;
       const p = this.worldToScreen(v.x, v.y);
       if (sim.selectedId === v.id || sim.hoveredId === v.id) {
-        ctx.fillStyle = "rgba(10,8,6,0.72)";
-        const name = v.name;
-        const tw = ctx.measureText(name).width + 10;
-        const nx = (p.x - tw / 2) | 0;
-        const ny = (p.y - 48) | 0;
-        ctx.fillRect(nx, ny, tw | 0, 13);
+        ctx.font = nameFont;
+        const name = v.displayName || v.name;
+        const tw = Math.ceil(ctx.measureText(name).width + 16);
+        const nx = Math.round(p.x - tw / 2);
+        const ny = Math.round(p.y - 56);
+        ctx.fillStyle = "rgba(8,6,4,0.82)";
+        roundRect(ctx, nx, ny, tw, 22, 6);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(232,180,90,0.45)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
         ctx.fillStyle = "#f6f0e6";
-        ctx.fillText(name, p.x | 0, (p.y - 38) | 0);
+        ctx.fillText(name, p.x, ny + 11);
       }
       if (v.speechT > 0 && v.speech) {
+        ctx.font = speechFont;
         const text = v.speech;
-        const tw = Math.min(160, ctx.measureText(text).width + 12);
-        const bx = (p.x - tw / 2) | 0;
-        const by = (p.y - 68) | 0;
-        ctx.fillStyle = "rgba(246,240,230,0.94)";
-        ctx.fillRect(bx, by, tw | 0, 18);
+        const maxW = Math.min(240, Math.max(120, this.canvas.width * 0.42));
+        const lines = wrapText(ctx, text, maxW - 20);
+        const lineH = 18;
+        const boxH = 12 + lines.length * lineH;
+        const tw = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 20);
+        const bx = Math.round(p.x - tw / 2);
+        const by = Math.round(p.y - 56 - boxH - (sim.selectedId === v.id || sim.hoveredId === v.id ? 8 : 0));
+        ctx.fillStyle = "rgba(252,248,240,0.97)";
+        roundRect(ctx, bx, by, tw, boxH, 8);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(36,28,20,0.2)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // Tail
+        ctx.fillStyle = "rgba(252,248,240,0.97)";
+        ctx.beginPath();
+        ctx.moveTo(p.x - 6, by + boxH - 1);
+        ctx.lineTo(p.x, by + boxH + 7);
+        ctx.lineTo(p.x + 6, by + boxH - 1);
+        ctx.fill();
         ctx.fillStyle = "#1a1410";
-        ctx.font = "500 10px Sora, sans-serif";
-        clipText(ctx, text, p.x | 0, by + 12, tw - 8);
-        ctx.font = "600 11px Sora, sans-serif";
+        lines.forEach((line, i) => {
+          ctx.fillText(line, p.x, by + 10 + i * lineH + lineH / 2);
+        });
       }
     }
-    ctx.font = "600 12px Fraunces, serif";
+    ctx.font = "700 15px Fraunces, Georgia, serif";
+    ctx.textBaseline = "alphabetic";
     for (const f of sim.floaters) {
       const p = this.worldToScreen(f.x, f.y);
       ctx.globalAlpha = Math.max(0, f.life / f.max);
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.lineWidth = 3;
+      ctx.strokeText(f.text, p.x, p.y);
       ctx.fillStyle = f.color;
-      ctx.fillText(f.text, p.x | 0, p.y | 0);
+      ctx.fillText(f.text, p.x, p.y);
     }
     ctx.globalAlpha = 1;
+    ctx.imageSmoothingEnabled = false;
   }
 
   drawFlash(ctx, sim, w, h) {
@@ -1519,4 +1543,27 @@ function clipText(ctx, text, x, y, maxW) {
   while (t.length > 2 && ctx.measureText(t).width > maxW) t = t.slice(0, -2);
   if (t !== text) t = `${t.slice(0, -1)}…`;
   ctx.fillText(t, x, y);
+}
+
+function wrapText(ctx, text, maxW) {
+  const words = String(text).split(/\s+/);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (ctx.measureText(next).width > maxW && line) {
+      lines.push(line);
+      line = w;
+    } else line = next;
+  }
+  if (line) lines.push(line);
+  // Cap length so bubbles don't cover the screen
+  if (lines.length > 3) {
+    const kept = lines.slice(0, 3);
+    let last = kept[2];
+    while (last.length > 2 && ctx.measureText(`${last}…`).width > maxW) last = last.slice(0, -1);
+    kept[2] = `${last}…`;
+    return kept;
+  }
+  return lines.length ? lines : [""];
 }

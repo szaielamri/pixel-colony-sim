@@ -621,7 +621,7 @@ export class Villager {
   say(text) {
     if (!text) return;
     this.speech = text;
-    this.speechT = 2.4 + Math.min(4, text.length * 0.04);
+    this.speechT = 3.6 + Math.min(5, text.length * 0.055);
   }
 
   think(text) {
