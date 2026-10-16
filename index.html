@@ -88,6 +88,7 @@
       <div class="meter"><span>Energy</span><div class="track"><div id="mEnergy" class="fill good"></div></div><em id="nEnergy"></em></div>
       <div class="meter"><span>Health</span><div class="track"><div id="mHealth" class="fill good"></div></div><em id="nHealth"></em></div>
       <div class="meter"><span>Belief</span><div class="track"><div id="mBelief" class="fill faith"></div></div><em id="nBelief"></em></div>
+      <p id="vBody" class="meta"></p>
       <h3>Spirit</h3>
       <div class="meter"><span>Empathy</span><div class="track"><div id="mEmp" class="fill faith"></div></div><em id="nEmp"></em></div>
       <div class="meter"><span>Bold</span><div class="track"><div id="mBold" class="fill study"></div></div><em id="nBold"></em></div>
@@ -113,6 +114,24 @@
         <button type="button" data-dir="down">▼</button>
         <button type="button" data-dir="right">▶</button>
       </div>
+      <button type="button" id="mobileAct" class="act">⚔</button>
+    </div>
+
+    <div id="toolBars">
+      <div id="buildBar" class="tool-bar">
+        <span class="tool-label">Build</span>
+        <button type="button" data-build="campfire" title="Campfire · 6 wood">🔥</button>
+        <button type="button" data-build="hut" title="Hut · 10 wood">⌂</button>
+        <button type="button" data-build="storage" title="Storage · 8 wood · 4 stone">📦</button>
+        <button type="button" data-build="research" title="Research table · 6 wood · 2 stone">📜</button>
+      </div>
+      <div id="brushBar" class="tool-bar">
+        <span class="tool-label">Land</span>
+        <button type="button" data-brush="raise" title="Raise land">⛰</button>
+        <button type="button" data-brush="dig" title="Dig water">🌊</button>
+        <button type="button" data-brush="plant" title="Plant trees">🌲</button>
+        <button type="button" data-brush="game" title="Spawn wild game">🦌</button>
+      </div>
     </div>
 
     <footer id="powers">
@@ -120,6 +139,7 @@
       <div id="noticeBar" class="hidden"></div>
       <div class="power-row">
         <button type="button" data-power="inspect" class="on" title="1"><span class="ico">👁</span><span class="lbl">Watch</span><i class="cd"></i><kbd>1</kbd></button>
+        <button type="button" data-power="possess" title="0"><span class="ico">◎</span><span class="lbl">Possess</span><i class="cd"></i><kbd>0</kbd></button>
         <button type="button" data-power="bless" title="2"><span class="ico">✦</span><span class="lbl">Bless</span><i class="cd"></i><kbd>2</kbd></button>
         <button type="button" data-power="inspire" title="3"><span class="ico">💡</span><span class="lbl">Inspire</span><i class="cd"></i><kbd>3</kbd></button>
         <button type="button" data-power="whisper" title="9"><span class="ico">🕊</span><span class="lbl">Whisper</span><i class="cd"></i><kbd>9</kbd></button>

@@ -1,5 +1,6 @@
 # Publish Emberkin to GitHub Pages
-# Usage: right-click → Run with PowerShell, or: powershell -ExecutionPolicy Bypass -File publish.ps1
+# 1) Install Git for Windows: https://git-scm.com/download/win
+# 2) In PowerShell:  powershell -ExecutionPolicy Bypass -File publish.ps1
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -22,18 +23,12 @@ $gh = Find-Exe @("gh") @(
   "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
 )
 
-if (-not $git) { throw "git not found. Install https://git-scm.com/ and re-run." }
+if (-not $git) {
+  throw "git not found. Install https://git-scm.com/download/win then re-run this script."
+}
 
 if (-not (Test-Path .git)) {
   & $git init -b main
-}
-
-& $git add index.html styles.css README.md .gitignore src/main.js src/simulation.js src/villager.js src/renderer.js publish.ps1
-& $git status
-
-$pending = & $git status --porcelain
-if ($pending) {
-  & $git commit -m "Publish Emberkin colony sim with founders, whispers, saves, and mobile UI"
 }
 
 $remote = & $git remote
@@ -43,14 +38,28 @@ if ($remote -notcontains "origin") {
   & $git remote set-url origin https://github.com/szaielamri/pixel-colony-sim.git
 }
 
+& $git add index.html styles.css README.md .gitignore publish.ps1 src/
+$pending = & $git status --porcelain
+if ($pending) {
+  & $git commit -m "Add possess mode, terrain brushes, building bar, prosthetics, and later eras"
+}
+
+Write-Host "Pulling remote (your earlier upload)..."
+& $git pull origin main --allow-unrelated-histories --no-edit
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "If there were conflicts, keep LOCAL versions of index.html, styles.css, and src/*, then:"
+  Write-Host "  git add ."
+  Write-Host "  git commit -m `"Merge remote upload with latest Emberkin`""
+  throw "Resolve pull conflicts, then re-run publish.ps1"
+}
+
+Write-Host "Pushing to GitHub..."
 & $git push -u origin main
 
 if ($gh) {
-  & $gh auth status
-  & $gh pages deploy . --branch main --remote origin 2>$null
   & $gh api repos/szaielamri/pixel-colony-sim/pages -X POST -f build_type=legacy -f source[branch]=main -f source[path]=/ 2>$null
-  Write-Host "Pages URL (after a minute): https://szaielamri.github.io/pixel-colony-sim/"
+  Write-Host "Pages URL (wait ~1 min): https://szaielamri.github.io/pixel-colony-sim/"
 } else {
-  Write-Host "Enable Pages manually: GitHub repo → Settings → Pages → Deploy from branch main / root"
+  Write-Host "Enable Pages: repo Settings → Pages → Deploy from branch main / (root)"
   Write-Host "https://szaielamri.github.io/pixel-colony-sim/"
 }

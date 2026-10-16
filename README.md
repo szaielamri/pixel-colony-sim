@@ -24,9 +24,13 @@ npx --yes serve .
 | Save button | Local / export / JSONBin cloud |
 
 ### God powers
-Watch · Bless · Inspire · **Whisper** · Manna · Lightning · Storm · Fire · Hut
+Watch · **Possess (0)** · Bless · Inspire · **Whisper** · Manna · Lightning · Storm · Fire · Hut
+
+**Possess:** click a villager, then WASD/arrows to move and Space to chop/build. Esc frees them (golden aura while possessed).
 
 **Whisper** opens a menu (innovation, pardon, love, explore, rain). Devout minds usually obey; rebellious ones may defy.
+
+**Build / Land bars:** place campfire, hut, storage, research blueprints; divine brushes raise land, dig water, plant trees, spawn wildlife.
 
 Tap a **❓** above a villager during a dilemma to guide them.
 

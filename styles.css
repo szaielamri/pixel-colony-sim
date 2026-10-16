@@ -580,11 +580,58 @@ blockquote {
   margin-bottom: 6px;
 }
 
+#toolBars {
+  position: absolute;
+  left: 14px;
+  bottom: 118px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+  z-index: 3;
+}
+
+.tool-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 14px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+}
+
+.tool-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-right: 2px;
+}
+
+.tool-bar button {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.tool-bar button.on {
+  border-color: rgba(230, 177, 92, 0.8);
+  color: var(--gold);
+  box-shadow: 0 0 14px rgba(230, 177, 92, 0.2);
+}
+
 #mobilePad {
   position: absolute;
   left: 12px;
   bottom: 120px;
-  width: 120px;
+  width: 132px;
   display: none;
   flex-direction: column;
   align-items: center;
@@ -603,6 +650,15 @@ blockquote {
   color: var(--ink);
   font-size: 16px;
 }
+
+#mobilePad .act {
+  margin-top: 4px;
+  width: 48px;
+  border-color: rgba(230, 177, 92, 0.45);
+  color: var(--gold);
+}
+
+body.possessing #toolBars { opacity: 0.35; pointer-events: none; }
 
 @media (max-width: 980px) {
   #chronicle { display: none; }
@@ -624,8 +680,13 @@ blockquote {
 }
 
 @media (max-width: 768px) {
-  body.is-mobile #mobilePad.force { display: flex; }
+  body.is-mobile #mobilePad.force,
+  body.possessing #mobilePad { display: flex; }
+  #toolBars { bottom: 168px; left: 8px; }
+  .tool-bar { padding: 4px 6px; }
+  .tool-bar button { width: 32px; height: 32px; font-size: 14px; }
   .stocks span { font-size: 12px; }
   .time-controls button { padding: 6px 8px; }
   #game { touch-action: none; }
+  .power-row { grid-template-columns: repeat(5, 1fr); }
 }
