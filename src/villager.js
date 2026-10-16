@@ -188,6 +188,13 @@ export function resolveConversation(a, b, sim) {
       student.intelligence = Math.min(100, student.intelligence + 0.6);
       sim.addInsight("culture", 0.8, student);
     }
+    // Share survival lore — especially food / farming
+    const field = teacher.urge || teacher.aptitude || sim.pickResearchField?.(teacher) || "food";
+    sim.addInsight(field, teacher.trait === "Curious" || student.trait === "Curious" ? 1.6 : 1.1, teacher);
+    if (field === "food" && Math.random() < 0.35) {
+      student.urge = "food";
+      if (Math.random() < 0.4) teacher.say(pick(["Watch the seed.", "This berry keeps.", "Plant it deep."]));
+    }
   }
 
   if (aff <= -35) {
@@ -665,6 +672,15 @@ export class Villager {
     if (this.want?.id === "pray") return pick(bits.trait.Devout);
     if (this.want?.id === "fight") return pick(bits.trait.Aggressive);
     if (this.want?.id === "create") return pick(bits.trait.Inventive);
+    if (this.want?.id === "learn") {
+      return pick([
+        "I want to know everything.",
+        "How does the soil work?",
+        "What haven't we tried?",
+        "Teach me farming.",
+        "There is always another why."
+      ]);
+    }
     if (this.want?.id === "help") return pick(bits.trait.Kind);
     if (this.job?.type === "gather" || this.job?.type === "build") return chance(0.5) ? pick(bits.work) : traitLine;
 
@@ -684,26 +700,43 @@ export class Villager {
     const night = sim.isNight();
     const hazard = sim.hazardAt(this.x, this.y);
 
-    push("eat", this.hunger * 1.2 + (this.hunger > 80 ? 40 : 0), "Find food");
-    push("rest", this.sleepDebt * 0.9 + (100 - this.energy) * 0.5 + (night ? 35 : 0), "Sleep");
-    push("warmth", this.bodyTemp < 36 ? (37 - this.bodyTemp) * 25 : 0, "Get warm");
-    push("flee", hazard ? 90 : this.safetyNeed < 25 ? 40 : 0, "Get safe");
-    push("social", (100 - this.socialNeed) * 0.7 + this.loneliness * 0.5 + (this.routineHint === "evening" ? 20 : 0), "Talk to someone");
-    push("love", this.partnerId ? 15 + (this.loneliness * 0.3) : 0, "Be with my love");
-    push("explore", 8 + this.boldnessScore * 0.15 + (this.trait === "Curious" ? 25 : 0) + (this.skills?.forage || 0) * 0.1, "Wander / explore");
-    push("create", 5 + (this.trait === "Inventive" ? 30 : 0) + (this.intelligence / 8) + (this.skills?.craft || 0) * 0.2, "Make / invent");
-    push("pray", (this.trait === "Devout" ? 28 : 0) + this.godAlignmentScore * 0.2 + this.religionBelief * 0.15, "Pray");
-    push("work", 12 + (this.trait === "Lazy" ? -15 : 10) + (this.routineHint === "morning" || this.routineHint === "afternoon" ? 18 : 0), "Work for the tribe");
+    const tribe = sim.tribeOf(this.tribeId);
+    const pop = tribe ? sim.tribePop(tribe.id) : 1;
+    const foodLow = tribe && tribe.food < pop * 3;
+    const atFire = sim.nearCampfire(this.x, this.y, this.tribeId);
+
+    // Survival wants dominate — independence means feeding/warming yourself first
+    push("eat", this.hunger * 1.8 + (this.hunger > 55 ? 70 : 0) + (this.hunger > 80 ? 50 : 0), "Find food");
+    push("rest", this.sleepDebt * 1.1 + (100 - this.energy) * 0.55 + (night ? 50 : 0) + (!atFire && night ? 30 : 0), "Sleep");
+    push("warmth", (!atFire && (this.bodyTemp < 36.2 || night)) ? (40 + (37 - this.bodyTemp) * 30) : (this.bodyTemp < 35.5 ? 50 : 0), "Get warm");
+    push("flee", hazard ? 120 : this.safetyNeed < 30 ? 45 : 0, "Get safe");
+    push("stock", foodLow ? 55 + (pop * 3 - (tribe?.food || 0)) * 2 : 0, "Fill the baskets");
+    push("social", (100 - this.socialNeed) * 0.55 + this.loneliness * 0.4 + (this.routineHint === "evening" ? 15 : 0), "Talk to someone");
+    push("love", this.partnerId ? 12 + (this.loneliness * 0.25) : 0, "Be with my love");
+    const nextTech = sim.nextSurvivalTech?.(this);
+    const learnBias = nextTech
+      ? 28 + (nextTech.field === "food" ? 35 : 0) + (nextTech.id === "farming" || nextTech.id === "foraging" ? 40 : 0)
+      : 10;
+    push("explore", 8 + this.boldnessScore * 0.12 + (this.trait === "Curious" ? 28 : 8) + (this.skills?.forage || 0) * 0.1 + this.intelligence * 0.05, "Wander / explore");
+    push("create", 10 + (this.trait === "Inventive" ? 32 : 8) + (this.intelligence / 7) + (this.skills?.craft || 0) * 0.15 + learnBias * 0.35, "Make / invent");
+    push("learn", learnBias + (this.trait === "Curious" ? 40 : 12) + (this.intelligence / 6) + (this.urge ? 20 : 0), "Study & discover");
+    push("pray", (this.trait === "Devout" ? 24 : 0) + this.godAlignmentScore * 0.15 + this.religionBelief * 0.12, "Pray");
+    push("work", 18 + (this.trait === "Lazy" ? -12 : 14) + (this.routineHint === "morning" || this.routineHint === "afternoon" ? 22 : 0) + (foodLow ? 20 : 0), "Work for the tribe");
     push("help", (this.empathyScore > 20 ? this.empathyScore * 0.35 : 0) + (this.trait === "Kind" ? 20 : 0), "Help someone");
     push("fight", (this.peacefulnessScore < -20 ? 25 : 0) + (this.trait === "Aggressive" ? 22 : 0) + (this.skills?.combat || 0) * 0.15, "Confront / fight");
-    push("mine", (this.skills?.mine || 0) * 0.4 + ((sim.tribeOf(this.tribeId)?.gold || 0) < 4 ? 12 : 0), "Seek gold / ore");
-    push("idle", 5 + (this.trait === "Lazy" ? 20 : 0) + this.moodDrift * 0.2, "Do nothing for a while");
+    push("mine", (this.skills?.mine || 0) * 0.4 + ((tribe?.gold || 0) < 4 ? 10 : 0), "Seek gold / ore");
+    push("idle", 3 + (this.trait === "Lazy" ? 14 : 0) + this.moodDrift * 0.15, "Do nothing for a while");
     push("grief", this.grief > 8 ? this.grief * 2 : 0, "Mourn");
 
-    // Personal autonomy noise — humans aren't optimizers
+    // Light personality noise — but never drown out crisis needs
+    const crisis = this.hunger > 70 || this.bodyTemp < 35 || !!hazard || (night && !atFire);
     for (const w of wants) {
-      w.score *= 0.75 + Math.random() * 0.55;
-      w.score *= 0.85 + this.autonomy * 0.3;
+      if (crisis && ["eat", "rest", "warmth", "flee", "stock"].includes(w.id)) {
+        w.score *= 1.15;
+        continue;
+      }
+      w.score *= 0.85 + Math.random() * 0.35;
+      w.score *= 0.9 + this.autonomy * 0.2;
     }
     wants.sort((a, b) => b.score - a.score);
     return wants;
@@ -715,16 +748,18 @@ export class Villager {
     this.wantT = Math.max(0, this.wantT - dt);
 
     // Refresh desires every few seconds
-    if (this.mindAcc > 2.2 + Math.random()) {
+    if (this.mindAcc > 1.6 + Math.random()) {
       this.mindAcc = 0;
       const wants = this.computeWants(sim);
       const top = wants[0];
-      // Sometimes pick 2nd or 3rd want — free will / impulsiveness
-      const pickI = chance(this.autonomy * 0.35) ? Math.min(2, (Math.random() * 3) | 0) : 0;
+      const crisis = this.hunger > 65 || this.bodyTemp < 35.2 || sim.hazardAt(this.x, this.y)
+        || (sim.isNight() && !sim.nearCampfire(this.x, this.y, this.tribeId));
+      // Free will only when safe — otherwise take the survival want
+      const pickI = crisis ? 0 : (chance(this.autonomy * 0.28) ? Math.min(2, (Math.random() * 3) | 0) : 0);
       const chosen = wants[pickI] || top;
-      if (chosen && (!this.want || this.wantT <= 0 || chosen.score > (this.want.score || 0) * 1.15)) {
+      if (chosen && (!this.want || this.wantT <= 0 || chosen.score > (this.want.score || 0) * 1.1 || crisis)) {
         this.want = chosen;
-        this.wantT = 4 + Math.random() * 8;
+        this.wantT = crisis ? 3 + Math.random() * 3 : 4 + Math.random() * 8;
         this.think(this.thoughtFromWant(chosen, sim));
       } else if (top) {
         this.think(this.thoughtFromWant(top, sim));
@@ -776,8 +811,17 @@ export class Villager {
       })(),
       explore: pick(["Beyond the trees.", "What if…", "I won't know until I go."]),
       create: pick(["A shape in my head.", "Build it.", "This could work."]),
+      learn: pick([
+        "What if seeds stay?",
+        "There must be a better way.",
+        "I need to know.",
+        "Watch the soil…",
+        "Why does that work?",
+        "Teach me the world."
+      ]),
       pray: pick(["Are you there?", "I need a sign.", "Quiet, please listen."]),
       work: pick(["Hands busy, mind quiet.", "For the tribe.", "One more task."]),
+      stock: pick(["Baskets first.", "Gather while we can.", "Empty stores won't feed us."]),
       help: pick(["Someone needs me.", "I can carry that.", "Don't cry alone."]),
       fight: pick(["I've had enough.", "They'll learn.", "Stand up."]),
       mine: pick(["Gold under the rock.", "Dig.", "Wealth is in the stone."]),
@@ -797,16 +841,21 @@ export class Villager {
       this.say(this.composeSpeech(null, "idle"));
       return true;
     }
-    if (id === "eat" && this.hunger > 45) {
+    if (id === "eat" && this.hunger > 40) {
       if (this.beginEat(sim)) {
-        if (chance(0.4)) this.say(this.composeSpeech(null, "idle"));
+        if (chance(0.35)) this.say(this.composeSpeech(null, "idle"));
         return true;
       }
     }
-    if (id === "rest" && (this.sleepDebt > 35 || sim.isNight() || this.energy < 30)) {
-      // Night owls / rebels may refuse sleep
-      if (sim.isNight() && this.boldnessScore > 40 && this.autonomy > 0.75 && chance(0.25)) {
-        this.say(pick(["Sleep is a rumor.", "I'll watch the dark.", "Not yet."]));
+    if (id === "stock") {
+      if (this.beginStockFood(sim)) return true;
+    }
+    if (id === "rest" && (this.sleepDebt > 30 || sim.isNight() || this.energy < 35)) {
+      const warm = sim.nearCampfire(this.x, this.y, this.tribeId) || this.bodyTemp > 36;
+      const fed = this.hunger < 70;
+      // Night wander only if already warm & fed — otherwise they keep themselves alive
+      if (sim.isNight() && warm && fed && this.boldnessScore > 55 && this.autonomy > 0.85 && chance(0.12)) {
+        this.say(pick(["I'll watch the dark.", "Not yet."]));
         this.want = { id: "explore", score: 40, label: "Night wander" };
         this.beginExplore(sim);
         return true;
@@ -817,8 +866,13 @@ export class Villager {
     if (id === "warmth") {
       const camp = sim.campTile(this.tribeId);
       if (camp) {
-        this.setJob(sim, { type: "wander", tx: camp.tx, ty: camp.ty });
-        this.taskLabel = "Seeking warmth";
+        if (sim.isNight() || this.energy < 40 || this.sleepDebt > 40) {
+          this.beginSleep(sim);
+          this.taskLabel = "Sleeping by the fire";
+        } else {
+          this.setJob(sim, { type: "wander", tx: camp.tx, ty: camp.ty });
+          this.taskLabel = "Seeking warmth";
+        }
         if (chance(0.5)) this.say(pick(SPEECH_BITS.cold));
         return true;
       }
@@ -850,10 +904,17 @@ export class Villager {
         return true;
       }
     }
-    if (id === "create") {
+    if (id === "create" || id === "learn") {
       this.beginResearch(sim);
-      this.taskLabel = "Chasing an idea";
-      this.say(pick(SPEECH_BITS.trait.Inventive));
+      const next = sim.nextSurvivalTech?.(this);
+      this.taskLabel = next
+        ? `Learning toward ${next.name}`
+        : id === "learn" ? "Studying the world" : "Chasing an idea";
+      if (chance(0.45)) {
+        this.say(next?.id === "farming" || next?.field === "food"
+          ? pick(["Seeds… stay?", "Food that waits.", "Teach the soil."])
+          : pick(["What if…", "I almost see it.", "One more thought."]));
+      }
       return true;
     }
     if (id === "help") {
@@ -1173,35 +1234,44 @@ export class Villager {
       this.energy = Math.min(100, this.energy + (night ? 14 : 8) * dt);
     } else {
       const chronotype = this.trait === "Lazy" ? 0.7 : this.boldnessScore > 40 ? 1.25 : 1;
-      this.sleepDebt = Math.min(100, this.sleepDebt + (night ? 4.5 : 1.1) * chronotype * dt);
-      if (night && this.sleepDebt > 25) this.energy = Math.max(0, this.energy - 3.2 * dt);
-      else if (!night) this.energy = Math.max(0, this.energy - 0.55 * dt);
+      this.sleepDebt = Math.min(100, this.sleepDebt + (night ? 2.2 : 0.7) * chronotype * dt);
+      if (night && this.sleepDebt > 40) this.energy = Math.max(0, this.energy - 1.4 * dt);
+      else if (!night) this.energy = Math.max(0, this.energy - 0.35 * dt);
     }
 
-    // Metabolism / hunger by life stage & activity
+    // Metabolism — paced for ~48s days so camps aren't wiped in minutes
     const stageMul = ({ infant: 0.55, child: 0.7, youth: 1.05, adult: 1, mature: 0.92, elder: 0.78 })[this.lifeStage] || 1;
-    let hungerRate = 0.78 * stageMul * (winter ? 1.35 : 1) * (this.trait === "Lazy" ? 0.9 : 1);
-    if (this.moving) hungerRate *= 1.35;
-    if (this.acting) hungerRate *= 1.5;
-    if (sleeping) hungerRate *= 0.65;
+    let hungerRate = 0.26 * stageMul * (winter ? 1.2 : 1) * (this.trait === "Lazy" ? 0.9 : 1);
+    if (this.moving) hungerRate *= 1.2;
+    if (this.acting) hungerRate *= 1.3;
+    if (sleeping) hungerRate *= 0.55;
     if (this.prayerBuffT > 0) hungerRate *= 0.72;
     this.hunger = Math.min(125, this.hunger + hungerRate * dt);
 
-    if (this.hunger > 100) this.health -= 5.2 * dt;
-    else if (this.health < 100 && this.hunger < 50 && this.energy > 40) {
-      this.health = Math.min(100, this.health + 0.8 * dt);
+    // Snack from camp stores when near the fire (AI doesn't always path to "eat" in time)
+    if (this.hunger > 48 && nearFire && !sleeping) {
+      const tribe = sim.tribeOf(this.tribeId);
+      if (tribe && tribe.food >= 0.4 && Math.random() < dt * 0.55) {
+        tribe.food = Math.max(0, tribe.food - 0.4);
+        this.hunger = Math.max(0, this.hunger - 14);
+      }
     }
 
-    // Thermoregulation — cold nights & winter hurt without fire
-    const target = nearFire ? Math.max(ambient, 34) + 4 : ambient + (sleeping ? 1 : 0);
-    this.bodyTemp += (target + 12 - this.bodyTemp) * Math.min(1, 0.35 * dt);
-    // Normalize toward 37 when warm enough
-    if (nearFire || ambient > 12) this.bodyTemp += (37 - this.bodyTemp) * 0.15 * dt;
-    if (this.bodyTemp < 35) {
-      this.health -= (35 - this.bodyTemp) * 1.8 * dt;
-      this.safetyNeed = Math.max(0, this.safetyNeed - 4 * dt);
+    if (this.hunger > 105) this.health -= 1.35 * dt;
+    else if (this.hunger > 95) this.health -= 0.55 * dt;
+    else if (this.health < 100 && this.hunger < 55 && this.energy > 35) {
+      this.health = Math.min(100, this.health + 1.1 * dt);
     }
-    if (winter && !nearFire && night) this.energy = Math.max(0, this.energy - 1.5 * dt);
+
+    // Thermoregulation — fire keeps you warm; cold is harsh but not instant death
+    const comfort = nearFire ? 37.2 : ambient + (sleeping ? 2 : 0) + (night ? -1 : 2);
+    this.bodyTemp += (comfort - this.bodyTemp) * Math.min(1, 0.45 * dt);
+    if (nearFire) this.bodyTemp += (37 - this.bodyTemp) * 0.25 * dt;
+    if (this.bodyTemp < 34) {
+      this.health -= (34 - this.bodyTemp) * 0.55 * dt;
+      this.safetyNeed = Math.max(0, this.safetyNeed - 2 * dt);
+    }
+    if (winter && !nearFire && night) this.energy = Math.max(0, this.energy - 0.6 * dt);
 
     // Aging — children grow faster in sim years; elders decline
     const yearLen = sim.yearLength;
@@ -1225,10 +1295,10 @@ export class Villager {
       }
     }
     if (this.lifeStage === "elder") {
-      this.health -= 0.55 * dt;
-      if (this.geneticHealth < 50) this.health -= 0.35 * dt;
+      this.health -= 0.18 * dt;
+      if (this.geneticHealth < 50) this.health -= 0.12 * dt;
     }
-    if (this.age > 78) this.health -= (this.age - 78) * 0.4 * dt;
+    if (this.age > 82) this.health -= (this.age - 82) * 0.15 * dt;
 
     // Memory fade — humans forget
     if (this.memories.length > 2 && Math.random() < dt * 0.01) {
@@ -1564,23 +1634,68 @@ export class Villager {
 
   shouldInterrupt(sim) {
     const feeding = this.job?.type === "eat" || (this.job?.type === "gather" && this.job.personal);
-    if (this.health < 12 && !feeding && this.job?.type !== "flee") return true;
+    const atFire = sim.nearCampfire(this.x, this.y, this.tribeId);
+    if (this.health < 18 && !feeding && this.job?.type !== "flee") return true;
     const hazard = sim.hazardAt(this.x, this.y);
-    if (hazard && this.job?.type !== "flee" && this.job?.type !== "pray") return true;
-    // Free minds: only interrupt for real crisis, not every night tick
-    if (this.sleepDebt > 80 && this.job?.type !== "sleep" && this.job?.type !== "eat") return true;
-    if (this.hunger > 95 && !feeding && this.job?.type !== "flee" && this.job?.type !== "pray") return true;
-    if (this.bodyTemp < 34.5 && this.job?.type !== "wander" && this.job?.type !== "flee") return true;
-    // Want changed strongly mid-job — sometimes they abandon task (human fickleness)
+    if (hazard && this.job?.type !== "flee") return true;
+    if (this.sleepDebt > 70 && this.job?.type !== "sleep" && this.job?.type !== "eat") return true;
+    if (this.hunger > 68 && !feeding && this.job?.type !== "flee") return true;
+    if (this.bodyTemp < 35.2 && this.job?.type !== "sleep" && this.job?.type !== "flee") return true;
+    if (sim.isNight() && !atFire && this.job?.type !== "sleep" && this.job?.type !== "flee" && this.job?.type !== "eat") return true;
+    // Whimsy only when safe
     if (this.want && this.job && !feeding && this.job.type !== "sleep" && this.job.type !== "flee") {
+      const crisis = this.hunger > 60 || this.bodyTemp < 35.5 || sim.isNight();
+      if (crisis) return false;
       const aligned =
         (this.want.id === "work" && ["gather", "build", "harvest", "till"].includes(this.job.type)) ||
+        (this.want.id === "stock" && this.job.type === "gather") ||
         (this.want.id === "social" && this.job.type === "talk") ||
         (this.want.id === "pray" && this.job.type === "pray") ||
         (this.want.id === "create" && this.job.type === "research") ||
+        (this.want.id === "learn" && this.job.type === "research") ||
         (this.want.id === "rest" && this.job.type === "sleep") ||
         (this.want.id === "explore" && this.job.type === "wander");
-      if (!aligned && this.autonomy > 0.7 && chance(0.02)) return true;
+      if (!aligned && this.autonomy > 0.8 && chance(0.012)) return true;
+    }
+    return false;
+  }
+
+  /** Self-reliance: eat, warm, sleep, stockpile — before hobbies. */
+  trySurvive(sim) {
+    const hazard = sim.hazardAt(this.x, this.y);
+    if (hazard) {
+      this.beginFlee(sim);
+      this.say(pick(["Run!", "Beast!", "Back to the fire—"]));
+      return true;
+    }
+    if (this.hunger > 55) {
+      if (this.beginEat(sim)) return true;
+    }
+    const atFire = sim.nearCampfire(this.x, this.y, this.tribeId);
+    if ((this.bodyTemp < 35.8 || (sim.isNight() && !atFire)) && !atFire) {
+      const camp = sim.campTile(this.tribeId);
+      if (camp) {
+        if (sim.isNight() || this.energy < 45 || this.sleepDebt > 35) {
+          this.beginSleep(sim);
+          this.taskLabel = "Returning to sleep by the fire";
+        } else {
+          this.setJob(sim, { type: "wander", tx: camp.tx, ty: camp.ty });
+          this.taskLabel = "Heading to the fire";
+        }
+        return true;
+      }
+    }
+    if (sim.isNight() && (this.energy < 55 || this.sleepDebt > 40)) {
+      this.beginSleep(sim);
+      return true;
+    }
+    if (this.energy < 18 || this.sleepDebt > 75) {
+      this.beginSleep(sim);
+      return true;
+    }
+    const tribe = sim.tribeOf(this.tribeId);
+    if (tribe && tribe.food < sim.tribePop(tribe.id) * 3.5 && this.hunger < 85) {
+      if (this.beginStockFood(sim)) return true;
     }
     return false;
   }
@@ -1590,32 +1705,24 @@ export class Villager {
     const hazard = sim.hazardAt(this.x, this.y);
     this.dailyRoutine(sim); // updates routineHint only
 
-    // Life-threatening: always react
-    if (hazard) {
-      if (this.trait === "Devout" && this.health > 38 && chance(urgent ? 0.5 : 0.25)) {
-        const here = sim.worldToTile(this.x, this.y);
-        this.job = { type: "pray", tx: here.tx, ty: here.ty, stage: "act", timer: 4.2, acc: 0 };
-        this.path = null;
-        this.taskLabel = "Praying into the danger";
-        this.say(this.composeSpeech(null, "idle"));
+    // Independence first — keep themselves (and the baskets) alive
+    if (this.trySurvive(sim)) return;
+
+    // When safe & fed, hunger for knowledge — especially farming / survival arts
+    if (!this.isChild && this.hunger < 50 && this.energy > 40 && !sim.isNight() && !this.job) {
+      const next = sim.nextSurvivalTech?.(this);
+      const foodPath = next && (next.field === "food" || next.id === "farming" || next.id === "foraging");
+      const curious = this.trait === "Curious" || this.trait === "Inventive" || this.urge || this.intelligence > 100;
+      if (next && (foodPath ? chance(0.55) : curious && chance(0.22))) {
+        this.beginResearch(sim);
+        if (chance(0.35)) this.say(foodPath
+          ? pick(["The seed knows.", "Grow…?", "Food that waits.", "Which berry keeps?"])
+          : pick(["I need to know.", "What is this?", "Show me.", "There must be more."]));
         return;
       }
-      this.beginFlee(sim);
-      this.say(pick(["Run!", "Not today—", "Out!"]));
-      return;
     }
 
-    // Free will — pursue own wants most of the time
-    if (!urgent || this.hunger > 90 || this.sleepDebt > 75 || this.bodyTemp < 35) {
-      const refreshed = this.computeWants(sim);
-      if (!this.want || this.wantT <= 0) {
-        this.want = refreshed[chance(this.autonomy * 0.4) ? Math.min(2, (Math.random() * 3) | 0) : 0];
-        this.wantT = 5 + Math.random() * 6;
-      }
-      if (this.pursueWant(sim)) return;
-    }
-
-    if (this.migrating && this.hunger <= 80 && !hazard) {
+    if (this.migrating && this.hunger <= 75 && !hazard) {
       const tribe = sim.tribeOf(this.tribeId);
       if (tribe) {
         const tile = sim.worldToTile(tribe.homeX, tribe.homeY);
@@ -1631,16 +1738,17 @@ export class Villager {
       return;
     }
 
-    // Only collapse when truly spent (free will otherwise)
-    if (this.energy < 12 || this.sleepDebt > 85) {
-      this.beginSleep(sim);
-      this.say(pick(["I can't…", "Down.", "Enough."]));
-      return;
+    // Free will when safe
+    const refreshed = this.computeWants(sim);
+    if (!this.want || this.wantT <= 0 || urgent) {
+      this.want = refreshed[0];
+      this.wantT = 4 + Math.random() * 5;
     }
+    if (this.pursueWant(sim)) return;
 
     // Personality-led choices, then tribe labor as backup
     if (this.personalityDecide(sim)) {
-      if (chance(0.25)) this.say(this.composeSpeech(null, "idle"));
+      if (chance(0.2)) this.say(this.composeSpeech(null, "idle"));
       return;
     }
 
@@ -1650,16 +1758,16 @@ export class Villager {
       return;
     }
 
-    if (this.trait !== "Lazy" || Math.random() < 0.45) {
+    if (this.trait !== "Lazy" || Math.random() < 0.55) {
       const blueprint = sim.nearestBlueprint(this);
-      if (blueprint && (this.trait !== "Lazy" || Math.random() < 0.35) && this.boldnessScore > -50) {
+      if (blueprint && (this.trait !== "Lazy" || Math.random() < 0.4) && this.boldnessScore > -50) {
         const stand = sim.standNear(blueprint.tx, blueprint.ty);
         this.setJob(sim, { type: "build", tx: stand.tx, ty: stand.ty, blueprintId: blueprint.id });
         this.taskLabel = `Raising a ${blueprint.type}`;
         return;
       }
 
-      if (tribe.food < sim.tribePop(tribe.id) * 2.2) {
+      if (tribe.food < sim.tribePop(tribe.id) * 4) {
         if (sim.hasTech("farming")) {
           const ripe = sim.findRipeFarm(this);
           if (ripe) {
@@ -1676,7 +1784,22 @@ export class Villager {
             return;
           }
         }
-        const foodTile = sim.findResource(this, ["manna", "bush"], 16);
+        if (sim.hasTech("fishing") || Math.random() < 0.3) {
+          const fish = sim.findFishSpot?.(this, 18);
+          if (fish) {
+            this.setJob(sim, {
+              type: "gather",
+              tx: fish.tx,
+              ty: fish.ty,
+              standTx: fish.standTx,
+              standTy: fish.standTy,
+              personal: tribe.food < 1 && this.hunger > 50
+            });
+            this.taskLabel = "Fishing the shallows";
+            return;
+          }
+        }
+        const foodTile = sim.findResource(this, ["manna", "bush", "mushroom"], 16);
         if (foodTile) {
           const stand = sim.standNear(foodTile.tx, foodTile.ty);
           this.setJob(sim, {
@@ -1687,9 +1810,14 @@ export class Villager {
             standTy: stand.ty,
             personal: tribe.food < 1 && this.hunger > 50
           });
-          this.taskLabel = foodTile.res === "manna" ? "Gathering a divine gift" : "Gathering berries";
+          this.taskLabel = foodTile.res === "manna" ? "Gathering a divine gift"
+            : foodTile.res === "mushroom" ? "Gathering mushrooms" : "Gathering berries";
           return;
         }
+      }
+
+      if (tribe.stone < 10 && (sim.hasTech("cave_lore") || Math.random() < 0.2)) {
+        if (this.beginExploreCave(sim)) return;
       }
 
       if (tribe.wood < 14) {
@@ -1748,11 +1876,28 @@ export class Villager {
   }
 
   childDecide(sim) {
-    if (this.hunger > 60) {
+    if (this.trySurvive(sim)) return;
+    if (this.hunger > 50) {
       if (this.beginEat(sim)) return;
     }
-    // Kids have wants too — play, cling, explore, chatter
+    // Kids watch and wonder — curiosity starts young
     const roll = Math.random();
+    if (roll < 0.18) {
+      const adult = sim.villagers.find((o) =>
+        !o.isChild && !o.dead && o.tribeId === this.tribeId &&
+        (o.job?.type === "research" || o.job?.type === "till" || o.job?.type === "gather") &&
+        Math.hypot(o.x - this.x, o.y - this.y) < 70
+      );
+      if (adult) {
+        const tile = sim.worldToTile(adult.x, adult.y);
+        this.setJob(sim, { type: "wander", tx: tile.tx, ty: tile.ty });
+        this.taskLabel = `Watching ${adult.name} learn`;
+        sim.addInsight(adult.job?.field || "food", 0.6, this);
+        if (chance(0.4)) this.say(pick(["Why?", "Show me!", "What's that?", "Can I try?"]));
+        return;
+      }
+    }
+    // Kids have wants too — play, cling, explore, chatter
     const parent = this.parentIds.map((id) => sim.villagerById(id)).find((p) => p && !p.dead);
     if (roll < 0.35 && parent && Math.hypot(parent.x - this.x, parent.y - this.y) > 28) {
       const tile = sim.worldToTile(parent.x, parent.y);
@@ -1806,39 +1951,161 @@ export class Villager {
 
   beginEat(sim) {
     const tribe = sim.tribeOf(this.tribeId);
+    // Prefer camp stores when available
     if (tribe && tribe.food >= 1) {
       const camp = sim.campTile(this.tribeId);
       if (camp) {
+        // Already at fire — eat immediately
+        if (sim.nearCampfire(this.x, this.y, this.tribeId)) {
+          tribe.food -= 1;
+          this.hunger = Math.max(0, this.hunger - 58);
+          this.energy = Math.min(100, this.energy + 6);
+          sim.float(this.x, this.y - 14, "ate", "#d7c4a2");
+          this.taskLabel = "Eating by the fire";
+          if (chance(0.4)) this.say("I needed that.");
+          return true;
+        }
         const stand = sim.standNear(camp.tx, camp.ty);
         this.setJob(sim, { type: "eat", tx: stand.tx, ty: stand.ty, mode: "stock" });
         this.taskLabel = "Going to eat";
         return true;
       }
     }
-    const tile = sim.findResource(this, ["manna", "bush"], 20);
+    // Fish from the shore when lore is known (or desperate)
+    if (sim.hasTech("fishing") || this.hunger > 85) {
+      const fish = sim.findFishSpot?.(this, this.hunger > 80 ? 28 : 20);
+      if (fish) {
+        this.setJob(sim, {
+          type: "gather",
+          tx: fish.tx,
+          ty: fish.ty,
+          standTx: fish.standTx,
+          standTy: fish.standTy,
+          personal: true
+        });
+        this.taskLabel = "Catching a fish";
+        return true;
+      }
+    }
+    // Forage farther when hungry
+    const radius = this.hunger > 80 ? 28 : 22;
+    const tile = sim.findResource(this, ["manna", "bush", "mushroom"], radius);
     if (tile) {
       const stand = sim.standNear(tile.tx, tile.ty);
       this.setJob(sim, { type: "gather", tx: tile.tx, ty: tile.ty, standTx: stand.tx, standTy: stand.ty, personal: true });
-      this.taskLabel = "Foraging a meal";
+      this.taskLabel = tile.res === "mushroom" ? "Picking cave mushrooms" : "Foraging a meal";
       return true;
     }
-    if (this.complainCd <= 0) {
-      this.say("The baskets are empty.");
-      this.complainCd = 8;
+    // Last resort: walk home and hope stores refill / someone else gathered
+    const camp = sim.campTile(this.tribeId);
+    if (camp) {
+      this.setJob(sim, { type: "wander", tx: camp.tx, ty: camp.ty });
+      this.taskLabel = "Hungry — returning to camp";
+      if (this.complainCd <= 0) {
+        this.say("The baskets are empty.");
+        this.complainCd = 8;
+      }
+      return true;
     }
     return false;
   }
 
+  /** Fill tribe stores — independence means planning ahead, not only eating. */
+  beginStockFood(sim) {
+    if (sim.hasTech("farming")) {
+      const ripe = sim.findRipeFarm(this);
+      if (ripe) {
+        const stand = sim.standNear(ripe.tx, ripe.ty);
+        this.setJob(sim, { type: "harvest", tx: ripe.tx, ty: ripe.ty, standTx: stand.tx, standTy: stand.ty });
+        this.taskLabel = "Bringing in the harvest";
+        return true;
+      }
+      const tribe = sim.tribeOf(this.tribeId);
+      const plot = sim.findFarmSite(this);
+      if (plot && tribe && sim.farmCount(tribe.id) < Math.max(2, Math.ceil(sim.tribePop(tribe.id) / 3))) {
+        const stand = sim.standNear(plot.tx, plot.ty);
+        this.setJob(sim, { type: "till", tx: plot.tx, ty: plot.ty, standTx: stand.tx, standTy: stand.ty });
+        this.taskLabel = "Planting for tomorrow";
+        return true;
+      }
+    }
+    if (sim.hasTech("fishing") || Math.random() < 0.25) {
+      const fish = sim.findFishSpot?.(this, 24);
+      if (fish) {
+        this.setJob(sim, {
+          type: "gather",
+          tx: fish.tx,
+          ty: fish.ty,
+          standTx: fish.standTx,
+          standTy: fish.standTy,
+          personal: false
+        });
+        this.taskLabel = sim.hasTech("fishing") ? "Fishing for the tribe" : "Trying the river";
+        if (!sim.hasTech("fishing") && chance(0.2)) {
+          this.urge = "food";
+          this.say(pick(["Something moves under…", "If I wait…", "Silver in the water."]));
+        }
+        return true;
+      }
+    }
+    const foodTile = sim.findResource(this, ["manna", "bush", "mushroom"], 24);
+    if (foodTile) {
+      const stand = sim.standNear(foodTile.tx, foodTile.ty);
+      this.setJob(sim, {
+        type: "gather",
+        tx: foodTile.tx,
+        ty: foodTile.ty,
+        standTx: stand.tx,
+        standTy: stand.ty,
+        personal: false
+      });
+      this.taskLabel = "Stocking the baskets";
+      return true;
+    }
+    return false;
+  }
+
+  beginExploreCave(sim) {
+    const cave = sim.findCave?.(this, 28);
+    if (!cave) return false;
+    const stand = sim.standNear(cave.tx, cave.ty);
+    // Stand on the cave tile itself when walkable
+    const dest = sim.walkable(cave.tx, cave.ty) ? cave : stand;
+    this.setJob(sim, {
+      type: "gather",
+      tx: cave.tx,
+      ty: cave.ty,
+      standTx: dest.tx,
+      standTy: dest.ty,
+      personal: false
+    });
+    this.taskLabel = sim.hasTech("cave_lore") ? "Delving the cave" : "Peering into the dark";
+    sim.addInsight("shelter", 0.5, this);
+    if (chance(0.3)) this.say(pick(["Echo…", "Cold stone.", "Ore glitter?", "Who lived here?"]));
+    return true;
+  }
+
   beginSleep(sim) {
-    const hut = sim.nearestStructure(this, ["hut", "longhouse"]) || null;
+    const hut = sim.nearestStructure(this, ["cabin", "hut", "longhouse"]) || null;
     const camp = sim.campTile(this.tribeId);
+    // Winter: prefer caves for warmth when known
+    if (!hut && sim.seasonIndex === 3 && sim.hasTech("cave_lore")) {
+      const cave = sim.findCave?.(this, 18);
+      if (cave && sim.walkable(cave.tx, cave.ty)) {
+        this.setJob(sim, { type: "sleep", tx: cave.tx, ty: cave.ty });
+        this.taskLabel = "Sheltering in a cave";
+        this.emoteLock = "sleep";
+        this.emoteLockT = 99;
+        return;
+      }
+    }
     const spot = hut
       ? sim.standNear(hut.tx, hut.ty)
       : camp
         ? sim.standNear(camp.tx, camp.ty)
         : sim.worldToTile(this.x, this.y);
     this.setJob(sim, { type: "sleep", tx: spot.tx, ty: spot.ty });
-    this.taskLabel = "Sleeping";
+    this.taskLabel = hut?.type === "cabin" ? "Sleeping in the cabin" : "Sleeping";
     this.emoteLock = "sleep";
     this.emoteLockT = 99;
   }
@@ -1847,6 +2114,12 @@ export class Villager {
   personalityDecide(sim) {
     const roll = Math.random();
     const tags = this.traitTags || [];
+
+    // Explorers / miners: caves & mountains
+    if ((this.trait === "Curious" || this.aptitude === "tools" || this.aptitude === "shelter" || roll < 0.12)
+      && (sim.hasTech("cave_lore") || sim.hasTech("mountain_paths") || this.trait === "Curious")) {
+      if (roll < 0.4 && this.beginExploreCave(sim)) return true;
+    }
 
     // Caregivers: heal / feed the sick and orphans
     if (this.empathyScore > 35 || this.trait === "Kind") {
@@ -2099,11 +2372,18 @@ export class Villager {
   }
 
   beginResearch(sim) {
-    const field = this.urge || this.aptitude || "tools";
-    const spot = sim.shrineTile(this.tribeId) || sim.campTile(this.tribeId) || sim.worldToTile(this.x, this.y);
+    const next = sim.nextSurvivalTech?.(this);
+    const field = sim.pickResearchField?.(this) || this.urge || this.aptitude || "food";
+    // Lock urge onto the discovery so they keep chasing it
+    if (next && (!this.urge || Math.random() < 0.6)) this.urge = next.field;
+    const table = sim.structures.find((s) => s.tribeId === this.tribeId && s.type === "research");
+    const spot = table
+      ? { tx: table.tx, ty: table.ty }
+      : (sim.shrineTile(this.tribeId) || sim.campTile(this.tribeId) || sim.worldToTile(this.x, this.y));
     const stand = sim.standNear(spot.tx, spot.ty);
-    this.setJob(sim, { type: "research", tx: stand.tx, ty: stand.ty, field, acc: 0 });
-    this.taskLabel = `Thinking about ${field}`;
+    this.setJob(sim, { type: "research", tx: stand.tx, ty: stand.ty, field, techId: next?.id || null, acc: 0 });
+    this.taskLabel = next ? `Figuring out ${next.name}` : `Thinking about ${field}`;
+    this.gainSkill?.("craft", 0.3);
   }
 
   beginWander(sim, radius = 6) {
@@ -2116,11 +2396,24 @@ export class Villager {
   beginFlee(sim) {
     const threat = sim.threatPoint(this.x, this.y);
     const here = sim.worldToTile(this.x, this.y);
+    const camp = sim.campTile(this.tribeId);
+    // Prefer running toward the fire when a camp exists and threat isn't there
+    if (camp) {
+      const campC = sim.tileCenter(camp.tx, camp.ty);
+      const campSafe = Math.hypot(campC.x - threat.x, campC.y - threat.y) > 28;
+      if (campSafe) {
+        const stand = sim.standNear(camp.tx, camp.ty);
+        this.setJob(sim, { type: "flee", tx: stand.tx, ty: stand.ty });
+        this.taskLabel = "Fleeing to the fire";
+        if (Math.random() < 0.45) this.say(pick(["To the fire!", "Run!", "Back—"]));
+        return;
+      }
+    }
     let best = null;
     let bestD = -1;
-    for (let i = 0; i < 10; i++) {
-      const tx = here.tx + ((Math.random() * 14) | 0) - 7;
-      const ty = here.ty + ((Math.random() * 14) | 0) - 7;
+    for (let i = 0; i < 12; i++) {
+      const tx = here.tx + ((Math.random() * 16) | 0) - 8;
+      const ty = here.ty + ((Math.random() * 16) | 0) - 8;
       if (!sim.walkable(tx, ty)) continue;
       if (sim.tileFire(tx, ty) > 0.2) continue;
       const c = sim.tileCenter(tx, ty);
@@ -2196,7 +2489,8 @@ export class Villager {
       const tribe = sim.tribeOf(this.tribeId);
       if (tribe && tribe.food >= 1) {
         tribe.food -= 1;
-        this.hunger = Math.max(0, this.hunger - 44);
+        this.hunger = Math.max(0, this.hunger - 58);
+        this.energy = Math.min(100, this.energy + 6);
         this.say("I needed that.");
         sim.addInsight("fire", 0.7, this);
         sim.float(this.x, this.y - 14, "ate", "#d7c4a2");
@@ -2208,10 +2502,29 @@ export class Villager {
     if (this.job.type === "gather" || this.job.type === "harvest" || this.job.type === "till") {
       if (this.job.timer > 0) {
         this.energy = Math.max(0, this.energy - 1.15 * dt);
+        // Hands teach the mind — foraging & farming grow food lore
+        if (this.job.type === "till" || this.job.type === "harvest") {
+          sim.addInsight("food", 0.55 * dt, this);
+        } else {
+          const tile = sim.getTile(this.job.tx, this.job.ty);
+          const res = tile?.res;
+          if (res === "bush" || res === "herb" || res === "mushroom" || res === "manna") {
+            sim.addInsight("food", 0.4 * dt, this);
+          } else if (res === "tree") sim.addInsight("tools", 0.15 * dt, this);
+          else if (res === "rock" || res === "ore" || res === "gold") sim.addInsight("tools", 0.25 * dt, this);
+        }
         return;
       }
       if (this.job.type === "gather") {
         sim.harvest(this, this.job.tx, this.job.ty, !!this.job.personal);
+        sim.addInsight("food", this.trait === "Curious" ? 2.2 : 1.4, this);
+        if (!sim.hasTech("foraging") && chance(0.12)) {
+          this.urge = "food";
+          this.say(pick(["This one is safe.", "Bitter… spit.", "Sweet red."]));
+        } else if (sim.hasTech("foraging") && !sim.hasTech("farming") && chance(0.1)) {
+          this.urge = "food";
+          this.say(pick(["If I plant…?", "Seed in the dirt.", "Come back spring."]));
+        }
         if (this.job.healTargetId) {
           const sick = sim.villagerById(this.job.healTargetId);
           if (sick && !sick.dead) {
@@ -2224,8 +2537,14 @@ export class Villager {
             sim.log(`${this.name} tends ${sick.name} with wild herbs.`, "good");
           }
         }
-      } else if (this.job.type === "harvest") sim.harvestFarm(this, this.job.tx, this.job.ty);
-      else sim.tillFarm(this, this.job.tx, this.job.ty);
+      } else if (this.job.type === "harvest") {
+        sim.harvestFarm(this, this.job.tx, this.job.ty);
+        sim.addInsight("food", 2.8, this);
+      } else {
+        sim.tillFarm(this, this.job.tx, this.job.ty);
+        sim.addInsight("food", 3.5, this);
+        if (!sim.hasTech("farming") && chance(0.2)) this.say(pick(["Seed is a promise.", "Stay, little root.", "Wait for green."]));
+      }
       this.job = null;
       return;
     }
@@ -2354,12 +2673,21 @@ export class Villager {
     }
 
     if (this.job.type === "research") {
-      this.energy = Math.max(0, this.energy - 0.55 * dt);
+      this.energy = Math.max(0, this.energy - 0.4 * dt);
       this.job.acc += dt;
-      const rate = this.trait === "Inventive" ? 2.3 : this.trait === "Curious" ? 1.5 : 1;
-      if (this.job.acc >= 1) {
+      let rate = this.trait === "Inventive" ? 3.2 : this.trait === "Curious" ? 2.6 : 1.8;
+      rate *= 0.9 + this.intelligence / 200;
+      // Studying the next survival tech (esp. farming) goes faster
+      if (this.job.techId === "farming" || this.job.techId === "foraging") rate *= 1.35;
+      if (this.job.field === "food") rate *= 1.15;
+      if (this.job.acc >= 0.85) {
         this.job.acc = 0;
         sim.addInsight(this.job.field, rate, this);
+        this.gainSkill?.("craft", 0.15);
+        if (chance(0.08)) {
+          const next = sim.nextSurvivalTech?.(this);
+          this.say(next ? `…${next.name}?` : pick(["Hmm.", "Almost.", "Again."]));
+        }
       }
       if (this.job.timer <= 0) this.job = null;
       return;
@@ -2540,7 +2868,7 @@ export class Villager {
       || type === "mourn" || type === "tend_sick" || type === "research_vaccine") {
       this.job.stage = "act";
       if (type === "pray") this.job.timer = 4.5;
-      else if (type === "research") this.job.timer = this.trait === "Inventive" ? 6.5 : 5;
+      else if (type === "research") this.job.timer = this.trait === "Inventive" || this.trait === "Curious" ? 9 : 7;
       else if (type === "craft_prosthetic") this.job.timer = 6;
       else if (type === "mourn") this.job.timer = 10;
       else if (type === "tend_sick") this.job.timer = this.job.timer ?? 6;

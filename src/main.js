@@ -3,7 +3,7 @@
 import { Renderer } from "./renderer.js";
 import { Simulation } from "./simulation.js";
 
-const SAVE_KEY = "emberkin_save_v2";
+const SAVE_KEY = "emberkin_save_v4";
 const CLOUD_KEY = "emberkin_jsonbin_key";
 const CLOUD_ROOM = "emberkin_jsonbin_room";
 
@@ -747,6 +747,7 @@ function scoreBar(id, score) {
 
 function saveLocal() {
   try {
+    if (!sim || sim.over) return; // don't lock you into a dead "Silence" save
     localStorage.setItem(SAVE_KEY, JSON.stringify(sim.serialize()));
   } catch (_) {}
 }
@@ -1057,6 +1058,13 @@ function updateHud() {
     $("overlay").classList.remove("hidden");
     $("overlayTitle").textContent = "Silence";
     $("overlayText").textContent = "Every voice has gone quiet. The ages keep whatever they learned.";
+    if (!sim._overSavedCleared) {
+      sim._overSavedCleared = true;
+      clearLocalSave();
+      paused = true;
+      $("pauseBtn").textContent = "Play";
+      $("pauseBtn").classList.add("on");
+    }
   }
 }
 
@@ -1096,7 +1104,8 @@ function frame(now) {
   }
   try {
     if (!sim) boot();
-    sim.update(paused ? 0 : raw * speed);
+    // Stop the clock on Silence so the colony doesn't keep "running" while dead
+    sim.update(paused || sim.over ? 0 : raw * speed);
     saveAcc += raw;
     if (saveAcc > 60) {
       saveAcc = 0;

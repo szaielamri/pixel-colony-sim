@@ -420,7 +420,10 @@ export class Renderer {
         let base = "#4d8f3f";
         if (tile.type === "water") base = n > 0.5 ? "#1d6d99" : "#185a86";
         else if (tile.type === "sand") base = n > 0.5 ? "#e0cb8a" : "#d2b56e";
+        else if (tile.type === "mountain") base = n > 0.5 ? "#9a9590" : winter ? "#d8dde2" : "#6e6a66";
         else if (tile.type === "rock") base = n > 0.5 ? "#8b877f" : "#6f6c66";
+        else if (tile.type === "foothill") base = winter ? "#c8d0c4" : n > 0.5 ? "#6a8a48" : "#5a7a3c";
+        else if (tile.type === "cave") base = "#2a2824";
         else if (tile.type === "path") base = "#8b6a42";
         else if (tile.type === "farm") base = "#6a4528";
         else if (tile.type === "barren") base = n > 0.5 ? "#6a5a48" : "#5a4a3a";
@@ -436,7 +439,7 @@ export class Renderer {
           c.fillStyle = `rgba(140,255,120,${0.12 + tile.fallout * 0.2})`;
           c.fillRect(x, y, sim.tile, sim.tile);
         }
-        if (tile.type === "grass" || tile.type === "sand") {
+        if (tile.type === "grass" || tile.type === "sand" || tile.type === "foothill") {
           c.fillStyle = winter ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.08)";
           for (let i = 0; i < 4; i++) {
             const px = x + ((sim.randAt(tx + i * 3, ty + 11) * 14) | 0);
@@ -454,10 +457,24 @@ export class Renderer {
             c.fillRect(x + 2, y + row, 12, tile.growth > 0.3 ? 2 : 1);
           }
         }
-        if (tile.type === "rock") {
-          c.fillStyle = "#b7b2aa";
+        if (tile.type === "rock" || tile.type === "mountain") {
+          c.fillStyle = tile.type === "mountain" ? "#d0ccc6" : "#b7b2aa";
           c.fillRect(x + 4, y + 5, 3, 2);
           c.fillRect(x + 9, y + 9, 2, 2);
+          if (tile.type === "mountain") {
+            c.fillStyle = winter ? "#f2f6fa" : "#c4c0ba";
+            c.fillRect(x + 5, y + 2, 6, 3);
+            c.fillStyle = "rgba(0,0,0,0.18)";
+            c.fillRect(x, y + 12, 16, 4);
+          }
+        }
+        if (tile.type === "cave") {
+          c.fillStyle = "#12100e";
+          c.fillRect(x + 4, y + 5, 8, 8);
+          c.fillStyle = "#3a3530";
+          c.fillRect(x + 3, y + 4, 10, 2);
+          c.fillRect(x + 3, y + 4, 2, 9);
+          c.fillRect(x + 11, y + 4, 2, 9);
         }
       }
     }
@@ -491,9 +508,20 @@ export class Renderer {
           const wave = ((Math.sin(time * 2.2 + tx * 0.7 + ty * 0.4) * 1.2) | 0);
           ctx.fillStyle = "rgba(210,240,255,0.28)";
           ctx.fillRect(x + 2, y + 8 + wave, 6, 1);
-        } else if ((tile.type === "grass" || tile.type === "sand") && ((tx + ty) & 3) === 0) {
+          if ((tile.fish || 0) > 0 || tile.res === "fish") {
+            const fx = x + 4 + ((Math.sin(time * 3 + tx) * 3) | 0);
+            const fy = y + 6 + ((Math.cos(time * 2.4 + ty) * 2) | 0);
+            ctx.fillStyle = "rgba(180,220,240,0.85)";
+            ctx.fillRect(fx, fy, 3, 1);
+            ctx.fillStyle = "rgba(255,255,255,0.5)";
+            ctx.fillRect(fx + 2, fy, 1, 1);
+          }
+        } else if ((tile.type === "grass" || tile.type === "sand" || tile.type === "foothill") && ((tx + ty) & 3) === 0) {
           ctx.fillStyle = winter ? "#f7fbff" : sim.seasonIndex === 2 ? "#d2b15a" : "#2f6a2c";
           ctx.fillRect(x + 3, y + 12, 1, 3);
+        } else if (tile.type === "cave" && ((tx + ty + this.frame) & 3) === 0) {
+          ctx.fillStyle = `rgba(240,200,120,${0.12 + Math.sin(time * 2 + tx) * 0.06})`;
+          ctx.fillRect(x + 6, y + 8, 4, 3);
         }
         if (tile.fire > 0) {
           const f = tile.fire;
@@ -694,6 +722,23 @@ export class Renderer {
       ctx.fillStyle = "#3a2818";
       ctx.fillRect(-5, 0, 2, 3);
       ctx.fillRect(2, 0, 2, 3);
+    } else if (k === "fish") {
+      const swim = Math.sin(time * 5 + a.phase) * 2;
+      ctx.fillStyle = "#6ab0c8";
+      ctx.fillRect((-4 + swim) | 0, -2, 6, 2);
+      ctx.fillStyle = "#d0eef8";
+      ctx.fillRect((1 + swim) | 0, -2, 1, 1);
+      ctx.fillStyle = "rgba(180,220,240,0.4)";
+      ctx.fillRect((-2 + swim) | 0, 0, 4, 1);
+    } else if (k === "eagle") {
+      const wing = Math.sin(time * 8 + a.phase) * 2;
+      ctx.fillStyle = "#5a5048";
+      ctx.fillRect(-3, -3, 6, 3);
+      ctx.fillStyle = "#8a8078";
+      ctx.fillRect((-8) | 0, (-2 + wing) | 0, 5, 1);
+      ctx.fillRect(3, (-2 - wing) | 0, 5, 1);
+      ctx.fillStyle = "#c45a4a";
+      ctx.fillRect(3, -4, 2, 1);
     } else if (k === "pig") {
       ctx.fillStyle = a.domestic ? "#f0b0a8" : "#c87868";
       ctx.fillRect(-5, -4, 10, 5);
@@ -723,7 +768,7 @@ export class Renderer {
     const y = ty * sim.tile;
     if (sim.placementBuild) {
       const tile = sim.getTile(tx, ty);
-      const ok = tile && tile.type !== "water" && tile.type !== "rock" && !tile.res;
+      const ok = tile && tile.type !== "water" && tile.type !== "rock" && tile.type !== "mountain" && !tile.res;
       ctx.save();
       ctx.globalAlpha = 0.45;
       ctx.strokeStyle = ok ? "#f0d78c" : "#e07a62";
@@ -794,6 +839,19 @@ export class Renderer {
       ctx.fillRect(x - 4, y - 5, 8, 5);
       ctx.fillStyle = "#fff6d0";
       ctx.fillRect(x - 1, y - 7, 2, 2);
+    } else if (tile.res === "fish") {
+      const swim = Math.sin(time * 3.2 + tx) * 2;
+      ctx.fillStyle = "#8ec8e0";
+      ctx.fillRect(x - 3 + swim, y - 3, 5, 2);
+      ctx.fillStyle = "#e8f6ff";
+      ctx.fillRect(x + 1 + swim, y - 3, 1, 1);
+    } else if (tile.res === "mushroom") {
+      ctx.fillStyle = "#c4a070";
+      ctx.fillRect(x - 1, y - 2, 2, 3);
+      ctx.fillStyle = "#d4555a";
+      ctx.fillRect(x - 3, y - 5, 6, 3);
+      ctx.fillStyle = "#f0d78c";
+      ctx.fillRect(x - 2, y - 4, 1, 1);
     }
   }
 
@@ -811,19 +869,36 @@ export class Renderer {
       ctx.fillRect(x + 6, y + 4, 4, 5);
       ctx.fillStyle = "#fff1c2";
       ctx.fillRect(x + 7, y + 6, 2, 2);
-    } else if (s.type === "hut" || s.type === "longhouse") {
-      ctx.fillStyle = "#c4a27a";
-      ctx.fillRect(x + 2, y + 7, 12, 8);
+    } else if (s.type === "hut" || s.type === "longhouse" || s.type === "cabin") {
+      const cabin = s.type === "cabin";
+      ctx.fillStyle = cabin ? "#8a6a48" : "#c4a27a";
+      ctx.fillRect(x + 2, y + 7, 12, cabin ? 9 : 8);
       ctx.fillStyle = "#6b3e2a";
       ctx.fillRect(x + 6, y + 10, 3, 5);
       ctx.fillStyle = color;
       for (let i = 0; i < 6; i++) ctx.fillRect(x + 2 + i, y + 6 - i, 12 - i * 2, 2);
       ctx.fillStyle = color;
       ctx.fillRect(x + 7, y + 3, 2, 2);
+      if (cabin) {
+        ctx.fillStyle = "#d8c8a8";
+        ctx.fillRect(x + 3, y + 9, 2, 2);
+        ctx.fillStyle = "#4a4038";
+        ctx.fillRect(x + 11, y + 4, 2, 4);
+      }
       if (s.sickBay) {
         ctx.fillStyle = "rgba(143,208,164,0.85)";
         ctx.fillRect(x + 3, y + 12, 3, 2);
       }
+    } else if (s.type === "dock") {
+      ctx.fillStyle = "#8d6a42";
+      ctx.fillRect(x + 1, y + 8, 14, 5);
+      ctx.fillStyle = "#a88858";
+      ctx.fillRect(x + 2, y + 9, 12, 1);
+      ctx.fillRect(x + 2, y + 11, 12, 1);
+      ctx.fillStyle = color;
+      ctx.fillRect(x + 12, y + 5, 2, 4);
+      ctx.fillStyle = "rgba(120,180,220,0.35)";
+      ctx.fillRect(x + 1, y + 13, 14, 2);
     } else if (s.type === "shrine") {
       ctx.fillStyle = "#9a958c";
       ctx.fillRect(x + 3, y + 11, 10, 3);
@@ -1435,7 +1510,10 @@ export class Renderer {
           if (t.type === "grass") mctx.fillStyle = "#3f7a34";
           else if (t.type === "water") mctx.fillStyle = "#1d6a96";
           else if (t.type === "sand") mctx.fillStyle = "#d2b56e";
+          else if (t.type === "mountain") mctx.fillStyle = "#b0aca8";
           else if (t.type === "rock") mctx.fillStyle = "#8a8680";
+          else if (t.type === "foothill") mctx.fillStyle = "#5a7a3c";
+          else if (t.type === "cave") mctx.fillStyle = "#2a2824";
           else if (t.type === "farm") mctx.fillStyle = "#c4a05a";
           else mctx.fillStyle = "#8b6a42";
           mctx.fillRect(tx * sx, ty * sy, Math.ceil(sx), Math.ceil(sy));

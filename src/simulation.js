@@ -8,14 +8,18 @@ export const MAP_H = 68;
 
 export const TECHS = [
   { id: "speech", name: "Basic Speech", field: "culture", era: "stone", cost: 8, requires: [], blurb: "Names for hunger, fear, and sky." },
-  { id: "foraging", name: "Foraging Lore", field: "food", era: "stone", cost: 8, requires: [], blurb: "Which red is sweet." },
-  { id: "campfire", name: "Campfire", field: "fire", era: "stone", cost: 16, requires: [], blurb: "A tame star." },
-  { id: "stone_tools", name: "Stone Tools", field: "tools", era: "stone", cost: 22, requires: [], blurb: "Edges that remember the hand." },
-  { id: "mud_huts", name: "Mud Huts", field: "shelter", era: "stone", cost: 26, requires: [], blurb: "Walls of river and straw." },
-  { id: "farming", name: "Farming", field: "food", era: "stone", cost: 40, requires: ["foraging"], blurb: "Seed is a promise." },
+  { id: "foraging", name: "Foraging Lore", field: "food", era: "stone", cost: 6, requires: [], blurb: "Which red is sweet." },
+  { id: "campfire", name: "Campfire", field: "fire", era: "stone", cost: 14, requires: [], blurb: "A tame star." },
+  { id: "stone_tools", name: "Stone Tools", field: "tools", era: "stone", cost: 20, requires: [], blurb: "Edges that remember the hand." },
+  { id: "mud_huts", name: "Mud Huts", field: "shelter", era: "stone", cost: 24, requires: [], blurb: "Walls of river and straw." },
+  { id: "farming", name: "Farming", field: "food", era: "stone", cost: 28, requires: ["foraging"], blurb: "Seed is a promise." },
+  { id: "fishing", name: "Fishing", field: "food", era: "stone", cost: 22, requires: ["foraging"], blurb: "The river keeps a second pantry." },
+  { id: "cave_lore", name: "Cave Lore", field: "shelter", era: "stone", cost: 24, requires: ["stone_tools"], blurb: "Dark mouths in the mountain remember ore." },
   { id: "nature_worship", name: "Nature Worship", field: "faith", era: "stone", cost: 26, requires: [], blurb: "The grove has a pulse." },
   { id: "weaving", name: "Weaving", field: "shelter", era: "bronze", cost: 46, requires: ["mud_huts"], blurb: "Thread becomes a second skin." },
   { id: "stronger_shelter", name: "Stronger Shelter", field: "shelter", era: "bronze", cost: 50, requires: ["mud_huts"], blurb: "Roofs that answer the wind." },
+  { id: "docks", name: "Docks", field: "food", era: "bronze", cost: 48, requires: ["fishing", "carpentry"], blurb: "Wood that walks on water." },
+  { id: "mountain_paths", name: "Mountain Paths", field: "tools", era: "bronze", cost: 52, requires: ["cave_lore", "stone_tools"], blurb: "A stair into the stone sky." },
   { id: "irrigation", name: "Irrigation", field: "food", era: "bronze", cost: 54, requires: ["farming"], blurb: "Water, taught to stay." },
   { id: "writing", name: "Writing", field: "culture", era: "bronze", cost: 48, requires: ["speech"], blurb: "Memory that outlives the mouth." },
   { id: "kiln", name: "Kiln", field: "fire", era: "bronze", cost: 44, requires: ["campfire"], blurb: "Clay, convinced." },
@@ -54,9 +58,11 @@ const ERA_LINES = {
 export const BUILD_COSTS = {
   campfire: { wood: 6, stone: 0 },
   hut: { wood: 10, stone: 0 },
+  cabin: { wood: 14, stone: 4 },
   storage: { wood: 8, stone: 4 },
   research: { wood: 6, stone: 2 },
   well: { wood: 4, stone: 6 },
+  dock: { wood: 10, stone: 2 },
   workbench: { wood: 8, stone: 2 },
   mine: { wood: 6, stone: 8 },
   gaswell: { wood: 8, stone: 10 },
@@ -67,17 +73,19 @@ const NATION_SUFFIX = ["land", "ia", "stan", "mark", "gard", "heim"];
 const ANIMAL_KINDS = [
   "deer", "wolf", "boar", "cattle", "fox",
   "rabbit", "bear", "sheep", "goat", "chicken",
-  "horse", "snake", "beaver", "moose", "pig"
+  "horse", "snake", "beaver", "moose", "pig", "fish", "eagle"
 ];
 const ANIMAL_HP = {
   wolf: 28, boar: 32, cattle: 40, fox: 14, deer: 18,
   rabbit: 8, bear: 55, sheep: 22, goat: 20, chicken: 6,
-  horse: 36, snake: 10, beaver: 16, moose: 48, pig: 26
+  horse: 36, snake: 10, beaver: 16, moose: 48, pig: 26,
+  fish: 6, eagle: 12
 };
 const ANIMAL_SPEED = {
   wolf: 28, fox: 30, rabbit: 34, horse: 36, snake: 16,
   bear: 18, moose: 17, cattle: 14, sheep: 16, chicken: 14,
-  beaver: 15, goat: 22, pig: 18, boar: 20, deer: 24
+  beaver: 15, goat: 22, pig: 18, boar: 20, deer: 24,
+  fish: 14, eagle: 40
 };
 const SEASONS = ["Spring", "Summer", "Autumn", "Winter"];
 const TRIBE_COLORS = ["#d08a45", "#6fa8c9", "#c46b8a", "#7dba6a"];
@@ -154,9 +162,9 @@ export class Simulation {
     this.namesUsed = new Set();
     this.nextId = 1;
     this.nextTribe = 1;
-    this.time = 18 * 0.34;
-    this.dayLength = 18;
-    this.daysPerSeason = 3;
+    this.time = 48 * 0.28;
+    this.dayLength = 48; // real seconds per in-game day (was 18 — too fast to survive)
+    this.daysPerSeason = 4;
     this.year = 1;
     this.seasonIndex = 0;
     this.lastSeason = 0;
@@ -293,9 +301,10 @@ export class Simulation {
   walkable(tx, ty) {
     const t = this.getTile(tx, ty);
     if (!t) return false;
-    if (t.type === "water" || t.type === "rock") return false;
+    if (t.type === "water" || t.type === "rock" || t.type === "mountain") return false;
     if (t.fire > 0.55) return false;
-    return true; // grass, path, sand, barren, farm
+    // cave, grass, path, sand, barren, farm, foothill
+    return true;
   }
 
   walkablePixel(x, y) {
@@ -351,7 +360,9 @@ export class Simulation {
           let type = "grass";
           if (h < 0.34 || riverD < 1.35) type = "water";
           else if (h < 0.4 || riverD < 2.35) type = "sand";
-          else if (h > 0.8 && moist < 0.52) type = "rock";
+          else if (h > 0.9) type = "mountain";
+          else if (h > 0.82 && moist < 0.55) type = "rock";
+          else if (h > 0.74 && moist < 0.48) type = "foothill";
           if (type === "water") water++;
           this.tiles.push({
             type,
@@ -364,7 +375,9 @@ export class Simulation {
             regrow: 0,
             nearWater: false,
             wear: 0,
-            moist
+            moist,
+            elev: h,
+            fish: 0
           });
         }
       }
@@ -444,9 +457,22 @@ export class Simulation {
         placed++;
       }
     };
-    scatter("bush", 28, 4, 18, 5);
+    scatter("bush", 40, 3, 14, 6);
     scatter("tree", 36, 6, 22, 4);
     scatter("stone", 14, 5, 16, 5);
+    // Guaranteed forage ring around the first fire
+    for (let y = -5; y <= 5; y++) {
+      for (let x = -5; x <= 5; x++) {
+        if (x * x + y * y < 4 || x * x + y * y > 28) continue;
+        const t = this.getTile(best.tx + x, best.ty + y);
+        if (!t || t.type !== "grass" || t.res) continue;
+        if (Math.random() < 0.55) {
+          t.res = "bush";
+          t.amount = 3 + ((Math.random() * 2) | 0);
+          t.max = 5;
+        }
+      }
+    }
 
     for (let ty = 0; ty < this.h; ty++) {
       for (let tx = 0; tx < this.w; tx++) {
@@ -481,15 +507,76 @@ export class Simulation {
       }
     }
 
+    // Caves carved into mountain / rock edges — ore, mushrooms, shelter
+    let caves = 0;
+    for (let ty = 2; ty < this.h - 2 && caves < 18; ty++) {
+      for (let tx = 2; tx < this.w - 2 && caves < 18; tx++) {
+        const t = this.getTile(tx, ty);
+        if (!t || (t.type !== "rock" && t.type !== "mountain" && t.type !== "foothill")) continue;
+        const roll = this.randAt(tx * 7 + 3, ty * 11 + 1);
+        if (roll < 0.88) continue;
+        const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+          const nb = this.getTile(tx + dx, ty + dy);
+          return nb && (nb.type === "grass" || nb.type === "sand" || nb.type === "foothill" || nb.type === "path");
+        });
+        if (!open) continue;
+        t.type = "cave";
+        t.res = roll > 0.96 ? "gold" : roll > 0.92 ? "stone" : "mushroom";
+        t.amount = t.res === "mushroom" ? 4 : 3 + ((roll * 3) | 0);
+        t.max = t.amount + 2;
+        caves++;
+      }
+    }
+
+    // Fish shoals in water — denser near shores
+    for (let ty = 0; ty < this.h; ty++) {
+      for (let tx = 0; tx < this.w; tx++) {
+        const t = this.getTile(tx, ty);
+        if (!t || t.type !== "water") continue;
+        const shore = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([x, y]) => {
+          const n = this.getTile(tx + x, ty + y);
+          return n && n.type !== "water";
+        });
+        const n = this.randAt(tx * 5 + 2, ty * 9 + 4);
+        if (shore && n > 0.55) {
+          t.fish = 2 + ((n * 4) | 0);
+          t.res = "fish";
+          t.amount = t.fish;
+          t.max = 8;
+        } else if (n > 0.92) {
+          t.fish = 1 + ((n * 2) | 0);
+          t.res = "fish";
+          t.amount = t.fish;
+          t.max = 6;
+        }
+      }
+    }
+
+    // Foothill scrub & mountain goats' forage
+    for (let ty = 0; ty < this.h; ty++) {
+      for (let tx = 0; tx < this.w; tx++) {
+        const t = this.getTile(tx, ty);
+        if (!t || t.res) continue;
+        if (t.type === "foothill") {
+          const n = this.randAt(tx + 17, ty + 23);
+          if (n > 0.7) {
+            t.res = n > 0.88 ? "stone" : "bush";
+            t.amount = n > 0.88 ? 3 : 2;
+            t.max = t.amount + 1;
+          }
+        }
+      }
+    }
+
     const tribe = {
       id: this.nextTribe++,
       name: "Emberkin",
       color: TRIBE_COLORS[0],
       homeX: center.x,
       homeY: center.y,
-      food: 36,
-      wood: 14,
-      stone: 4,
+      food: 96,
+      wood: 22,
+      stone: 8,
       gold: 0,
       gas: 0,
       expect: 0,
@@ -786,7 +873,7 @@ export class Simulation {
       this.terrainDirty = false;
       this.terrainRev++;
     }
-    if (!this.villagers.length) {
+    if (!this.villagers.length && !this.over) {
       this.over = true;
       this.log("The last voice goes quiet. The land keeps the ashes.", "bad");
     }
@@ -984,15 +1071,98 @@ export class Simulation {
         if (this.hasTech("crop_rotation")) g *= 1.2;
         t.growth = Math.min(1.4, t.growth + g * dt);
       }
+      if (t.type === "cave" && t.res === "mushroom" && t.amount < (t.max || 4)) {
+        t.regrow = (t.regrow || 0) + dt * 0.04;
+        if (t.regrow > 8) {
+          t.amount = Math.min(t.max || 4, t.amount + 1);
+          t.regrow = 0;
+        }
+      }
+    }
+    // Fish shoals replenish along shores
+    for (let ty = 0; ty < this.h; ty++) {
+      for (let tx = 0; tx < this.w; tx++) {
+        const t = this.getTile(tx, ty);
+        if (!t || t.type !== "water") continue;
+        const isShore = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+          const n = this.getTile(tx + dx, ty + dy);
+          return n && n.type !== "water";
+        });
+        if (!isShore && !(t.fish > 0)) continue;
+        const cap = t.max || (isShore ? 8 : 5);
+        const rate = (spring || this.seasonIndex === 1 ? 0.07 : winter ? 0.015 : 0.04) * (isShore ? 1 : 0.4);
+        t.fish = Math.min(cap, (t.fish || 0) + rate * dt);
+        if (t.fish >= 1) {
+          t.res = "fish";
+          t.amount = Math.floor(t.fish);
+          t.max = cap;
+        }
+      }
     }
   }
 
   tickPassiveInsight(dt) {
     for (const v of this.villagers) {
       if (v.isChild || v.dead) continue;
-      if (v.trait === "Inventive") this.addInsight(v.urge || v.aptitude, 0.09 * dt, null);
-      else if (v.trait === "Curious") this.addInsight(FIELDS[(v.id + (this.time | 0)) % FIELDS.length], 0.05 * dt, null);
+      // Everyone wonders a little; Curious / Inventive wonder more
+      const field = this.pickResearchField(v);
+      let rate = 0.035;
+      if (v.trait === "Inventive") rate = 0.14;
+      else if (v.trait === "Curious") rate = 0.11;
+      else if (v.intelligence > 110) rate = 0.06;
+      // Hunger for knowledge when a survival tech is almost in reach
+      const next = this.nextSurvivalTech(v);
+      if (next && next.field === field) rate *= 1.45;
+      this.addInsight(field, rate * dt, null);
+      // Nudge urges toward what the people still need to learn
+      if (!v.urge && Math.random() < dt * 0.08) {
+        v.urge = field;
+      }
     }
+  }
+
+  /** Next unlockable tech that most helps the tribe survive / grow. */
+  nextSurvivalTech(v = null) {
+    const tribe = v ? this.tribeOf(v.tribeId) : this.tribes[0];
+    const pop = tribe ? this.tribePop(tribe.id) : this.villagers.length;
+    const food = tribe?.food ?? 0;
+    const candidates = TECHS.filter((t) => !this.unlocked.has(t.id) && this.available(t));
+    if (!candidates.length) return null;
+    const score = (t) => {
+      let s = 100 - t.cost;
+      // Food / farming path is sacred early
+      if (t.field === "food") s += 40;
+      if (t.id === "foraging") s += 55;
+      if (t.id === "farming") s += 70;
+      if (t.id === "fishing") s += 50;
+      if (t.id === "cave_lore") s += 30;
+      if (t.id === "docks" || t.id === "mountain_paths") s += 20;
+      if (t.id === "irrigation" || t.id === "crop_rotation") s += 35;
+      if (t.field === "fire" && !this.hasTech("campfire")) s += 50;
+      if (t.field === "shelter" && food > 0) s += 20;
+      if (t.field === "tools") s += 18;
+      if (t.id === "speech" || t.id === "writing") s += 22;
+      if (food < pop * 2.5 && t.field === "food") s += 45;
+      if (this.seasonIndex === 3 && (t.field === "fire" || t.field === "shelter")) s += 25;
+      if (v?.aptitude === t.field) s += 12;
+      if (v?.urge === t.field) s += 18;
+      if (v?.trait === "Curious") s += 8;
+      if (v?.trait === "Inventive" && (t.field === "tools" || t.field === "fire")) s += 10;
+      return s;
+    };
+    return candidates.slice().sort((a, b) => score(b) - score(a))[0] || null;
+  }
+
+  pickResearchField(v) {
+    const next = this.nextSurvivalTech(v);
+    if (next) {
+      // Mostly chase the next survival discovery; sometimes wander into another field
+      if (Math.random() < 0.78 || v?.trait === "Inventive") return next.field;
+    }
+    if (v?.urge && FIELDS.includes(v.urge)) return v.urge;
+    if (v?.aptitude && FIELDS.includes(v.aptitude)) return v.aptitude;
+    // Curious minds sample every field
+    return FIELDS[(Math.random() * FIELDS.length) | 0];
   }
 
   tickOverlaps() {
@@ -1081,6 +1251,24 @@ export class Simulation {
           continue;
         }
       }
+      if (this.hasTech("docks") && this.countStructures(tribe.id, ["dock"]) < 2 && tribe.wood >= 10 && tribe.stone >= 2) {
+        const site = this.findDockSite(tribe);
+        if (site) {
+          tribe.wood -= 10;
+          tribe.stone -= 2;
+          this.blueprints.push({ id: this.nextId++, type: "dock", tx: site.tx, ty: site.ty, tribeId: tribe.id, progress: 0 });
+          continue;
+        }
+      }
+      if (this.hasTech("stronger_shelter") && this.countStructures(tribe.id, ["cabin"]) < Math.ceil(pop / 5) && tribe.wood >= 14 && tribe.stone >= 4) {
+        const site = this.findCabinSite(tribe) || this.findBuildSite(tribe, 3, 8);
+        if (site) {
+          tribe.wood -= 14;
+          tribe.stone -= 4;
+          this.blueprints.push({ id: this.nextId++, type: "cabin", tx: site.tx, ty: site.ty, tribeId: tribe.id, progress: 0 });
+          continue;
+        }
+      }
       if (this.hasTech("reactors") && this.countStructures(tribe.id, ["reactor"]) < 1 && tribe.stone >= 20 && tribe.wood >= 12) {
         const site = this.findBuildSite(tribe, 4, 8);
         if (site) {
@@ -1100,13 +1288,102 @@ export class Simulation {
       const tx = home.tx + Math.round(Math.cos(ang) * rad);
       const ty = home.ty + Math.round(Math.sin(ang) * rad);
       const t = this.getTile(tx, ty);
-      if (!t || (t.type !== "grass" && t.type !== "path" && t.type !== "sand" && t.type !== "barren")) continue;
+      if (!t || (t.type !== "grass" && t.type !== "path" && t.type !== "sand" && t.type !== "barren" && t.type !== "foothill")) continue;
       if (t.res || t.fire > 0) continue;
       if (this.structures.some((s) => s.tx === tx && s.ty === ty)) continue;
       if (this.blueprints.some((s) => s.tx === tx && s.ty === ty)) continue;
       return { tx, ty };
     }
     return null;
+  }
+
+  findDockSite(tribe) {
+    const home = this.worldToTile(tribe.homeX, tribe.homeY);
+    for (let i = 0; i < 50; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const rad = 2 + Math.random() * 10;
+      const tx = home.tx + Math.round(Math.cos(ang) * rad);
+      const ty = home.ty + Math.round(Math.sin(ang) * rad);
+      const t = this.getTile(tx, ty);
+      if (!t || (t.type !== "sand" && t.type !== "grass" && t.type !== "path")) continue;
+      if (t.res || t.fire > 0) continue;
+      if (this.structures.some((s) => s.tx === tx && s.ty === ty)) continue;
+      if (this.blueprints.some((s) => s.tx === tx && s.ty === ty)) continue;
+      const wet = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => this.getTile(tx + dx, ty + dy)?.type === "water");
+      if (wet) return { tx, ty };
+    }
+    return null;
+  }
+
+  findCabinSite(tribe) {
+    const home = this.worldToTile(tribe.homeX, tribe.homeY);
+    for (let i = 0; i < 40; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const rad = 4 + Math.random() * 12;
+      const tx = home.tx + Math.round(Math.cos(ang) * rad);
+      const ty = home.ty + Math.round(Math.sin(ang) * rad);
+      const t = this.getTile(tx, ty);
+      if (!t || (t.type !== "foothill" && t.type !== "grass" && t.type !== "sand")) continue;
+      if (t.res || t.fire > 0) continue;
+      if (this.structures.some((s) => s.tx === tx && s.ty === ty)) continue;
+      if (this.blueprints.some((s) => s.tx === tx && s.ty === ty)) continue;
+      const nearHigh = [[1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [0, 2]].some(([dx, dy]) => {
+        const n = this.getTile(tx + dx, ty + dy);
+        return n && (n.type === "mountain" || n.type === "rock" || n.type === "cave");
+      });
+      if (nearHigh || t.type === "foothill") return { tx, ty };
+    }
+    return null;
+  }
+
+  findFishSpot(v, radius = 22) {
+    const here = this.worldToTile(v.x, v.y);
+    let best = null;
+    let bestD = Infinity;
+    const dockBonus = this.structures.some((s) => s.tribeId === v.tribeId && s.type === "dock");
+    for (let y = -radius; y <= radius; y++) {
+      for (let x = -radius; x <= radius; x++) {
+        const tx = here.tx + x;
+        const ty = here.ty + y;
+        const tile = this.getTile(tx, ty);
+        if (!tile || tile.type !== "water") continue;
+        if ((tile.fish || 0) <= 0 && tile.res !== "fish") continue;
+        // Must have a walkable shore neighbor
+        const shore = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => this.walkable(tx + dx, ty + dy));
+        if (!shore) continue;
+        let d = x * x + y * y;
+        if (dockBonus) {
+          const dock = this.structures.find((s) => s.tribeId === v.tribeId && s.type === "dock");
+          if (dock) d -= 40 / (1 + Math.hypot(tx - dock.tx, ty - dock.ty));
+        }
+        if (d < bestD) {
+          bestD = d;
+          best = { tx, ty, standTx: tx + shore[0], standTy: ty + shore[1] };
+        }
+      }
+    }
+    return best;
+  }
+
+  findCave(v, radius = 26) {
+    const here = this.worldToTile(v.x, v.y);
+    let best = null;
+    let bestD = Infinity;
+    for (let y = -radius; y <= radius; y++) {
+      for (let x = -radius; x <= radius; x++) {
+        const tx = here.tx + x;
+        const ty = here.ty + y;
+        const tile = this.getTile(tx, ty);
+        if (!tile || tile.type !== "cave") continue;
+        if ((tile.amount || 0) <= 0) continue;
+        const d = x * x + y * y;
+        if (d < bestD) {
+          bestD = d;
+          best = { tx, ty };
+        }
+      }
+    }
+    return best;
   }
 
   countStructures(tribeId, types) {
@@ -1714,11 +1991,28 @@ export class Simulation {
     if (this.weather?.type === "hurricane") return "hurricane";
     const t = this.getTileAtPixel(x, y);
     if (t?.fire > 0.3) return "fire";
+    if (this.nearbyPredator(x, y, 34)) return "beast";
     return null;
+  }
+
+  nearbyPredator(x, y, radius = 34) {
+    let best = null;
+    let bestD = radius;
+    for (const a of this.animals || []) {
+      if (a.kind !== "wolf" && a.kind !== "bear" && a.kind !== "snake") continue;
+      const d = Math.hypot(a.x - x, a.y - y);
+      if (d < bestD) {
+        bestD = d;
+        best = a;
+      }
+    }
+    return best;
   }
 
   threatPoint(x, y) {
     if (this.weather?.type === "hurricane") return { x: this.weather.eyeX, y: this.weather.eyeY };
+    const beast = this.nearbyPredator(x, y, 40);
+    if (beast) return { x: beast.x, y: beast.y };
     const t = this.worldToTile(x, y);
     for (let r = 0; r < 6; r++) {
       for (let y2 = -r; y2 <= r; y2++) {
@@ -1733,7 +2027,7 @@ export class Simulation {
   }
 
   nearCampfire(x, y, tribeId) {
-    return this.structures.some((s) => s.type === "campfire" && s.tribeId === tribeId && Math.hypot(s.tx * this.tile + 8 - x, s.ty * this.tile + 8 - y) < 30);
+    return this.structures.some((s) => s.type === "campfire" && s.tribeId === tribeId && Math.hypot(s.tx * this.tile + 8 - x, s.ty * this.tile + 8 - y) < 52);
   }
 
   campTile(tribeId) {
@@ -1864,6 +2158,39 @@ export class Simulation {
     const bronze = this.hasTech("bronze") ? 1 : 0;
     const iron = this.hasTech("iron") ? 1 : 0;
     const bonus = iron ? 2 : bronze ? 1 : 0;
+    if (tile.res === "fish") {
+      const dock = this.structures.some((s) => s.tribeId === v.tribeId && s.type === "dock"
+        && Math.hypot(s.tx - tx, s.ty - ty) < 8);
+      const catchN = (dock ? 3 : 2) + (this.hasTech("fishing") ? 1 : 0) + (personal ? 0 : bonus > 0 ? 1 : 0);
+      tile.fish = Math.max(0, (tile.fish || tile.amount || 1) - 1);
+      tile.amount = Math.floor(tile.fish);
+      if (tile.amount <= 0) {
+        tile.res = null;
+        tile.amount = 0;
+      }
+      if (personal) v.hunger = Math.max(0, v.hunger - 32);
+      else if (tribe) tribe.food += catchN;
+      this.addInsight("food", this.hasTech("fishing") ? 2.4 : 1.8, v);
+      v.gainSkill?.("forage", 0.8);
+      this.burst(v.x, v.y, "#7ec8e8", 5);
+      this.float(v.x, v.y - 12, personal ? "ate fish" : `+${catchN} fish`, "#a8d8f0");
+      this.sfx.push("gather");
+      return;
+    }
+    if (tile.res === "mushroom") {
+      tile.amount -= 1;
+      if (tile.amount <= 0) {
+        tile.res = "mushroom";
+        tile.amount = 0;
+      }
+      if (personal) v.hunger = Math.max(0, v.hunger - 22);
+      else if (tribe) tribe.food += 2 + bonus;
+      this.addInsight("food", 1.6, v);
+      this.addInsight("shelter", 0.8, v);
+      this.burst(v.x, v.y, "#c4a070", 4);
+      this.float(v.x, v.y - 12, personal ? "ate" : "+2 food", "#c4a070");
+      return;
+    }
     if (tile.res === "bush" || tile.res === "manna") {
       const wasManna = tile.res === "manna";
       const yieldFood = (wasManna ? 3 : 2) + (personal ? 0 : bonus);
@@ -1960,6 +2287,8 @@ export class Simulation {
       mine: 120,
       gaswell: 100,
       hut: this.hasTech("stronger_shelter") ? 170 : 110,
+      cabin: 190,
+      dock: 110,
       shrine: 90,
       storage: 120,
       research: 100,
@@ -2093,9 +2422,9 @@ export class Simulation {
 
   get ambientTemp() {
     // Rough °C feel by season + day/night — drives hypothermia & mood
-    const base = [12, 24, 14, -2][this.seasonIndex] ?? 12;
-    const nightMul = this.isNight() ? -8 : this.dayT > 0.35 && this.dayT < 0.55 ? 4 : 0;
-    const storm = this.weather?.type === "hurricane" ? -6 : this.weather?.type === "rain" ? -3 : 0;
+    const base = [14, 24, 15, 4][this.seasonIndex] ?? 14;
+    const nightMul = this.isNight() ? -5 : this.dayT > 0.35 && this.dayT < 0.55 ? 4 : 0;
+    const storm = this.weather?.type === "hurricane" ? -4 : this.weather?.type === "rain" ? -2 : 0;
     return base + nightMul + storm;
   }
 
@@ -3009,14 +3338,20 @@ export class Simulation {
     if (!cost) return;
     const { tx, ty } = this.worldToTile(x, y);
     const tile = this.getTile(tx, ty);
-    if (!tile || tile.type === "water" || tile.type === "rock" || tile.res) {
+    if (!tile || tile.type === "water" || tile.type === "rock" || tile.type === "mountain" || tile.res) {
       return this.log("That ground will not hold a structure.", "info");
     }
     if (this.structures.some((s) => s.tx === tx && s.ty === ty) || this.blueprints.some((b) => b.tx === tx && b.ty === ty)) {
       return this.log("Something already stands there.", "info");
     }
     if (type === "hut" && !this.hasTech("mud_huts")) return this.log("Mud Huts are not yet known.", "info");
+    if (type === "cabin" && !this.hasTech("stronger_shelter")) return this.log("Stronger Shelter is not yet known.", "info");
+    if (type === "dock" && !this.hasTech("docks")) return this.log("Docks are not yet known.", "info");
     if (type === "reactor" && !this.hasTech("reactors")) return this.log("Reactors are not yet known.", "info");
+    if (type === "dock") {
+      const wet = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => this.getTile(tx + dx, ty + dy)?.type === "water");
+      if (!wet) return this.log("A dock needs the water's edge.", "info");
+    }
     const tribe = this.nearestTribe(x, y);
     if (!tribe) return;
     if (tribe.wood < cost.wood || tribe.stone < (cost.stone || 0)) {
@@ -3057,29 +3392,35 @@ export class Simulation {
 
   pickWildKind(nearWater = false) {
     const roll = Math.random();
+    const early = this.year < 2;
+    if (nearWater === "fish") return "fish";
+    if (nearWater === "mountain") return roll < 0.7 ? "goat" : "eagle";
     if (nearWater) {
-      if (roll < 0.35) return "beaver";
-      if (roll < 0.5) return "snake";
-      if (roll < 0.65) return "deer";
-      if (roll < 0.8) return "moose";
+      if (roll < 0.35) return "fish";
+      if (roll < 0.55) return "beaver";
+      if (roll < 0.68) return early ? "deer" : "snake";
+      if (roll < 0.85) return "deer";
+      if (roll < 0.95) return "moose";
       return "fox";
     }
-    if (roll < 0.14) return "deer";
-    if (roll < 0.22) return "rabbit";
-    if (roll < 0.3) return "fox";
-    if (roll < 0.37) return "chicken";
+    // Bias toward prey / livestock early; fewer apex predators
+    if (roll < 0.16) return "deer";
+    if (roll < 0.28) return "rabbit";
+    if (roll < 0.36) return "chicken";
     if (roll < 0.44) return "sheep";
-    if (roll < 0.5) return "goat";
-    if (roll < 0.56) return "pig";
-    if (roll < 0.62) return "boar";
-    if (roll < 0.68) return "cattle";
-    if (roll < 0.74) return "horse";
-    if (roll < 0.8) return "wolf";
-    if (roll < 0.86) return "moose";
-    if (roll < 0.91) return "bear";
-    if (roll < 0.95) return "snake";
-    if (roll < 0.98) return "beaver";
-    return ANIMAL_KINDS[(Math.random() * ANIMAL_KINDS.length) | 0];
+    if (roll < 0.52) return "goat";
+    if (roll < 0.58) return "pig";
+    if (roll < 0.64) return "fox";
+    if (roll < 0.7) return "cattle";
+    if (roll < 0.76) return "boar";
+    if (roll < 0.8) return "horse";
+    if (roll < 0.84) return "moose";
+    if (roll < 0.88) return "eagle";
+    if (early) return roll < 0.95 ? "deer" : "fox";
+    if (roll < 0.94) return "wolf";
+    if (roll < 0.97) return "snake";
+    if (roll < 0.99) return "bear";
+    return "beaver";
   }
 
   spawnAnimal(x, y, kind = "deer") {
@@ -3107,7 +3448,7 @@ export class Simulation {
       const tx = 4 + ((Math.random() * (this.w - 8)) | 0);
       const ty = 4 + ((Math.random() * (this.h - 8)) | 0);
       const t = this.getTile(tx, ty);
-      if (!t || (t.type !== "grass" && t.type !== "sand")) continue;
+      if (!t || (t.type !== "grass" && t.type !== "sand" && t.type !== "foothill")) continue;
       let nearWater = false;
       for (let oy = -2; oy <= 2 && !nearWater; oy++) {
         for (let ox = -2; ox <= 2; ox++) {
@@ -3119,6 +3460,24 @@ export class Simulation {
       }
       const c = this.tileCenter(tx, ty);
       this.spawnAnimal(c.x, c.y, this.pickWildKind(nearWater));
+    }
+    // Fish schools in the water
+    for (let i = 0; i < 14; i++) {
+      const tx = 2 + ((Math.random() * (this.w - 4)) | 0);
+      const ty = 2 + ((Math.random() * (this.h - 4)) | 0);
+      const t = this.getTile(tx, ty);
+      if (!t || t.type !== "water") continue;
+      const c = this.tileCenter(tx, ty);
+      this.spawnAnimal(c.x, c.y, "fish");
+    }
+    // Mountain goats & eagles
+    for (let i = 0; i < 8; i++) {
+      const tx = 2 + ((Math.random() * (this.w - 4)) | 0);
+      const ty = 2 + ((Math.random() * (this.h - 4)) | 0);
+      const t = this.getTile(tx, ty);
+      if (!t || (t.type !== "mountain" && t.type !== "foothill" && t.type !== "rock" && t.type !== "cave")) continue;
+      const c = this.tileCenter(tx, ty);
+      this.spawnAnimal(c.x, c.y, this.pickWildKind("mountain"));
     }
   }
 
@@ -3198,19 +3557,42 @@ export class Simulation {
       const len = Math.hypot(a.vx, a.vy) || 1;
       const nx = a.x + (a.vx / len) * Math.min(len, speed) * dt;
       const ny = a.y + (a.vy / len) * Math.min(len, speed) * dt;
-      if (this.walkablePixel(nx, ny)) {
+      if (a.kind === "fish") {
+        const nt = this.worldToTile(nx, ny);
+        if (this.getTile(nt.tx, nt.ty)?.type === "water") {
+          a.x = nx;
+          a.y = ny;
+        } else {
+          a.vx *= -0.8;
+          a.vy *= -0.8;
+        }
+      } else if (a.kind === "eagle") {
+        // Eagles skim mountains and open sky — ignore ground blockers
+        a.x = Math.max(8, Math.min(this.w * this.tile - 8, nx));
+        a.y = Math.max(8, Math.min(this.h * this.tile - 8, ny));
+      } else if (a.kind === "goat") {
+        const nt = this.worldToTile(nx, ny);
+        const gt = this.getTile(nt.tx, nt.ty);
+        if (gt && (gt.type === "foothill" || gt.type === "mountain" || gt.type === "rock" || gt.type === "cave" || this.walkablePixel(nx, ny))) {
+          if (gt.type !== "water") {
+            a.x = nx;
+            a.y = ny;
+          }
+        }
+      } else if (this.walkablePixel(nx, ny)) {
         a.x = nx;
         a.y = ny;
       }
 
-      // Predators
+      // Predators — shy in early years so the first camp can establish
       if (a.kind === "wolf" || a.kind === "bear" || a.kind === "snake") {
-        const rate = a.kind === "bear" ? 0.08 : a.kind === "snake" ? 0.1 : 0.12;
+        const early = this.year < 3 ? 0.28 : this.year < 6 ? 0.55 : 1;
+        const rate = (a.kind === "bear" ? 0.045 : a.kind === "snake" ? 0.06 : 0.07) * early;
         const reach = a.kind === "bear" ? 26 : a.kind === "snake" ? 14 : 22;
         if (Math.random() < dt * rate) {
           const prey = this.pickVillager(a.x, a.y, reach);
           if (prey && !prey.dead) {
-            const dmg = a.kind === "bear" ? 14 + Math.random() * 12 : a.kind === "snake" ? 5 + Math.random() * 6 : 8 + Math.random() * 10;
+            const dmg = (a.kind === "bear" ? 10 + Math.random() * 8 : a.kind === "snake" ? 4 + Math.random() * 4 : 5 + Math.random() * 6) * (this.year < 3 ? 0.65 : 1);
             prey.injure("Torso", dmg, this);
             if (a.kind !== "snake") prey.injure(Math.random() < 0.5 ? "LeftArm" : "RightArm", 5, this);
             if (a.kind === "snake" && Math.random() < 0.35) prey.catchIllness?.("flu", 8);
@@ -3359,6 +3741,8 @@ export class Simulation {
       seasonIndex: this.seasonIndex,
       era: this.era,
       seed: this.seed,
+      dayLength: this.dayLength,
+      daysPerSeason: this.daysPerSeason,
       homeX: this.homeX,
       homeY: this.homeY,
       unlocked: [...this.unlocked],
@@ -3376,7 +3760,7 @@ export class Simulation {
       blueprints: this.blueprints.map((b) => ({ ...b })),
       tiles: this.tiles.map((t) => [
         t.type, t.res || "", t.amount || 0, t.max || 0, +(t.fire > 0 ? t.fire.toFixed(2) : 0),
-        t.growth || 0, t.nearWater ? 1 : 0, t.burned || 0
+        t.growth || 0, t.nearWater ? 1 : 0, t.burned || 0, t.fish || 0, +(Number(t.elev || 0).toFixed(3))
       ]),
       villagers: this.villagers.map((v) => ({
         id: v.id, name: v.name, age: v.age, ageAcc: v.ageAcc, hunger: v.hunger, energy: v.energy,
@@ -3429,8 +3813,8 @@ export class Simulation {
     sim.nextTribe = data.nextTribe || 1;
     sim.nextFounderLine = data.nextFounderLine || 1;
     sim.time = data.time || 0;
-    sim.dayLength = 18;
-    sim.daysPerSeason = 3;
+    sim.dayLength = data.dayLength || 48;
+    sim.daysPerSeason = data.daysPerSeason || 4;
     sim.year = data.year || 1;
     sim.seasonIndex = data.seasonIndex || 0;
     sim.lastSeason = sim.seasonIndex;
@@ -3492,7 +3876,9 @@ export class Simulation {
     for (const row of data.tiles || []) {
       sim.tiles.push({
         type: row[0], res: row[1] || null, amount: row[2], max: row[3], fire: row[4] || 0,
-        growth: row[5] || 0, nearWater: !!row[6], burned: row[7] || 0, wear: 0, regrow: 0, moist: 0.5
+        growth: row[5] || 0, nearWater: !!row[6], burned: row[7] || 0,
+        fish: row[8] || 0, elev: row[9] || 0.5,
+        wear: 0, regrow: 0, moist: 0.5
       });
     }
     const need = sim.w * sim.h;
