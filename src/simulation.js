@@ -3,8 +3,8 @@
 import { Villager, takeName, TRAITS } from "./villager.js";
 
 export const TILE = 16;
-export const MAP_W = 64;
-export const MAP_H = 44;
+export const MAP_W = 96;
+export const MAP_H = 68;
 
 export const TECHS = [
   { id: "speech", name: "Basic Speech", field: "culture", era: "stone", cost: 8, requires: [], blurb: "Names for hunger, fear, and sky." },
@@ -56,8 +56,28 @@ export const BUILD_COSTS = {
   hut: { wood: 10, stone: 0 },
   storage: { wood: 8, stone: 4 },
   research: { wood: 6, stone: 2 },
+  well: { wood: 4, stone: 6 },
   workbench: { wood: 8, stone: 2 },
+  mine: { wood: 6, stone: 8 },
+  gaswell: { wood: 8, stone: 10 },
   reactor: { wood: 12, stone: 20 }
+};
+
+const NATION_SUFFIX = ["land", "ia", "stan", "mark", "gard", "heim"];
+const ANIMAL_KINDS = [
+  "deer", "wolf", "boar", "cattle", "fox",
+  "rabbit", "bear", "sheep", "goat", "chicken",
+  "horse", "snake", "beaver", "moose", "pig"
+];
+const ANIMAL_HP = {
+  wolf: 28, boar: 32, cattle: 40, fox: 14, deer: 18,
+  rabbit: 8, bear: 55, sheep: 22, goat: 20, chicken: 6,
+  horse: 36, snake: 10, beaver: 16, moose: 48, pig: 26
+};
+const ANIMAL_SPEED = {
+  wolf: 28, fox: 30, rabbit: 34, horse: 36, snake: 16,
+  bear: 18, moose: 17, cattle: 14, sheep: 16, chicken: 14,
+  beaver: 15, goat: 22, pig: 18, boar: 20, deer: 24
 };
 const SEASONS = ["Spring", "Summer", "Autumn", "Winter"];
 const TRIBE_COLORS = ["#d08a45", "#6fa8c9", "#c46b8a", "#7dba6a"];
@@ -74,17 +94,35 @@ const POWER_MAX = {
   hurricane: 26,
   wildfire: 10,
   hut: 1,
-  whisper: 2.5
+  whisper: 2.5,
+  rain: 8,
+  quake: 18
 };
 
-function pickPrayer() {
-  const lines = [
-    "Spare our child from the fever.",
-    "Send rain before the baskets empty.",
-    "Strike the wolf that stalks the ridge.",
-    "Bless the harvest we have planted.",
-    "Forgive our quarrel by the fire."
-  ];
+const GOAL_DEFS = [
+  { id: "pop12", label: "Grow to 12 living souls", test: (s) => s.villagers.length >= 12 },
+  { id: "bronze", label: "Enter the Bronze Age", test: (s) => s.eraIndex(s.era) >= s.eraIndex("bronze") },
+  { id: "faith", label: "Found a religion", test: (s) => !!s.religion },
+  { id: "festival", label: "Hold a festival", test: (s) => !!s.goalsDone?.festival },
+  { id: "survive5", label: "Reach Year 5", test: (s) => s.year >= 5 }
+];
+
+function pickPrayer(sim) {
+  const devout = sim?.villagers?.filter((v) => !v.dead && (v.godAlignmentScore > 20 || v.religionBelief > 40)) || [];
+  const who = devout.length ? devout[(Math.random() * devout.length) | 0] : null;
+  const name = who?.name || "A villager";
+  const sickChild = sim?.villagers?.find((v) => v.isChild && v.illness && !v.dead);
+  const hungry = sim?.tribes?.some((t) => t.food < 8);
+  const lines = [];
+  if (sickChild) lines.push(`${name} prays for healing for ${sickChild.name}.`);
+  if (hungry) lines.push(`${name} prays the baskets fill before winter.`);
+  lines.push(
+    `${name} prays for lightning to strike the wolf den.`,
+    `${name} prays for rain on the dry fields.`,
+    `${name} prays for peace after a bitter quarrel.`,
+    `${name} asks that the sick rise by morning.`,
+    `${name} begs forgiveness for scraps taken in hunger.`
+  );
   return lines[(Math.random() * lines.length) | 0];
 }
 
@@ -137,7 +175,7 @@ export class Simulation {
     this.hoveredId = null;
     this.activePower = "inspect";
     this.cursor = null;
-    this.cooldowns = { bless: 0, inspire: 0, food: 0, lightning: 0, hurricane: 0, wildfire: 0, hut: 0, whisper: 0, possess: 0 };
+    this.cooldowns = { bless: 0, inspire: 0, food: 0, lightning: 0, hurricane: 0, wildfire: 0, hut: 0, whisper: 0, possess: 0, rain: 0, quake: 0 };
     this.pendingNomads = null;
     this.prayerRequest = null;
     this.eventAcc = 12;
@@ -147,6 +185,10 @@ export class Simulation {
     this.brushMode = null;
     this.animals = [];
     this.pollutionAcc = 0;
+    this.festival = null;
+    this.festivalCd = 40;
+    this.goalsDone = {};
+    this.quakeT = 0;
     this.cooldownMax = POWER_MAX;
     this.toast = null;
     this.over = false;
@@ -159,8 +201,18 @@ export class Simulation {
     this.faithAcc = 0;
     this.homeX = 0;
     this.homeY = 0;
+    this.graves = [];
+    this.vaccineReady = false;
+    this.factionMissions = [];
+    this.factionAcc = 0;
+    this.tribeRelations = {}; // key `${a}-${b}` -> affinity -100..100
+    this.wars = [];
+    this.warAcc = 0;
+    this.nationAcc = 0;
+    this.economyAcc = 0;
+    this.spectatorHint = true;
     this.generate();
-    this.log("Your people wake in the Stone Age. They do not yet know your name.", "god");
+    this.log("Your people wake in the Stone Age. They will build without you — watch, or reach when you wish.", "god");
   }
 
   get yearLength() {
@@ -392,9 +444,9 @@ export class Simulation {
         placed++;
       }
     };
-    scatter("bush", 12, 3, 8, 4);
-    scatter("tree", 16, 5, 12, 3);
-    scatter("stone", 5, 4, 10, 4);
+    scatter("bush", 28, 4, 18, 5);
+    scatter("tree", 36, 6, 22, 4);
+    scatter("stone", 14, 5, 16, 5);
 
     for (let ty = 0; ty < this.h; ty++) {
       for (let tx = 0; tx < this.w; tx++) {
@@ -417,6 +469,14 @@ export class Simulation {
           t.res = "stone";
           t.amount = 4;
           t.max = 4;
+        } else if (nearRock && n > 0.82 && !t.res) {
+          t.res = "gold";
+          t.amount = 3;
+          t.max = 5;
+        } else if (n > 0.965 && !t.res && t.type === "grass") {
+          t.res = "gas";
+          t.amount = 4;
+          t.max = 6;
         }
       }
     }
@@ -430,10 +490,16 @@ export class Simulation {
       food: 36,
       wood: 14,
       stone: 4,
+      gold: 0,
+      gas: 0,
       expect: 0,
       arrived: 0,
       announced: true,
-      leaderId: null
+      leaderId: null,
+      isNation: false,
+      nationName: null,
+      govTitle: "Elder",
+      atWarWith: []
     };
     this.tribes.push(tribe);
     this.structures.push({
@@ -488,6 +554,7 @@ export class Simulation {
         generation: 0,
         founderLineId: lineId,
         founderLineName: name,
+        surname: name,
         sex: i % 2 === 0 ? "m" : "f"
       });
       v.initPersonalityFromTrait(trait);
@@ -542,9 +609,11 @@ export class Simulation {
         a.food += t.food;
         a.wood += t.wood;
         a.stone += t.stone;
+        a.gold += t.gold || 0;
+        a.gas += t.gas || 0;
         return a;
       },
-      { food: 0, wood: 0, stone: 0 }
+      { food: 0, wood: 0, stone: 0, gold: 0, gas: 0 }
     );
   }
 
@@ -618,6 +687,8 @@ export class Simulation {
   update(dt) {
     if (this.over) return;
     this.time += dt;
+    this._tickPhase = (this._tickPhase | 0) + 1;
+    const phase = this._tickPhase;
     this.godMemory = Math.max(0, this.godMemory - dt);
     this.flash = Math.max(0, this.flash - dt * 1.7);
     this.splitCd = Math.max(0, this.splitCd - dt);
@@ -627,25 +698,57 @@ export class Simulation {
     }
     for (const k of Object.keys(this.cooldowns)) this.cooldowns[k] = Math.max(0, this.cooldowns[k] - dt);
 
+    // Always-on: clock, weather, fires, villagers
     this.tickClock(dt);
     this.tickWeather(dt);
     this.tickFires(dt);
-    this.tickResources(dt);
-    this.tickPassiveInsight(dt);
-    this.tickPopulationEvents(dt);
-    this.tickDisease(dt);
-    this.tickPrayers(dt);
-    this.tickAnimals(dt);
-    this.tickPollution(dt);
-    this.tickFallout(dt);
 
-    for (const v of this.villagers) v.update(dt, this);
-    this.villagers = this.villagers.filter((v) => !v.dead);
-    for (const id of [...this.byId.keys()]) {
-      if (!this.villagers.some((v) => v.id === id)) this.byId.delete(id);
+    // Stagger heavy world systems across frames (same wall-time feel via 2–4× dt)
+    const p4 = phase & 3;
+    if (p4 === 0) {
+      this.tickResources(dt * 4);
+      this.tickPassiveInsight(dt * 4);
+    } else if (p4 === 1) {
+      this.tickPopulationEvents(dt * 4);
+      this.tickDisease(dt * 4);
+      this.tickPrayers(dt * 4);
+    } else if (p4 === 2) {
+      this.tickAnimals(dt * 4);
+      this.tickPollution(dt * 4);
+      this.tickFallout(dt * 4);
+    } else {
+      this.tickFestival(dt * 4);
+      this.tickQuake(dt * 4);
+      this.tickGoals();
+      this.tickFactionMissions(dt * 4);
+      this.tickOfferings(dt * 4);
+    }
+    if ((phase & 1) === 0) {
+      this.tickNations(dt * 2);
+      this.tickWars(dt * 2);
+    } else {
+      this.tickEconomy(dt * 2);
+      this.tickAutonomousGod(dt * 2);
     }
 
-    this.tickOverlaps();
+    // Villagers: everyone moves every frame; deep AI staggered in batches
+    const n = this.villagers.length;
+    const batches = n > 48 ? 4 : n > 24 ? 3 : 2;
+    const batch = phase % batches;
+    for (let i = 0; i < n; i++) {
+      const v = this.villagers[i];
+      const deep = (i % batches) === batch;
+      v._aiThisFrame = deep;
+      v._aiScale = deep ? batches : 1;
+      v.update(dt, this);
+    }
+    if (this.villagers.some((v) => v.dead)) {
+      this.villagers = this.villagers.filter((v) => !v.dead);
+      this.byId.clear();
+      for (const v of this.villagers) this.byId.set(v.id, v);
+    }
+
+    if ((phase & 1) === 0) this.tickOverlaps();
     this.projectAcc += dt;
     if (this.projectAcc > 1.2) {
       this.projectAcc = 0;
@@ -666,6 +769,7 @@ export class Simulation {
       f.life -= dt;
       f.y -= 8 * dt;
     }
+    if (this.floaters.length > 40) this.floaters.length = 40;
     this.floaters = this.floaters.filter((f) => f.life > 0);
     for (const p of this.fx) {
       p.life -= dt;
@@ -673,6 +777,7 @@ export class Simulation {
       p.y += p.vy * dt;
       p.vy += 10 * dt;
     }
+    if (this.fx.length > 120) this.fx.length = 120;
     this.fx = this.fx.filter((p) => p.life > 0);
     for (const b of this.bolts) b.life -= dt;
     this.bolts = this.bolts.filter((b) => b.life > 0);
@@ -1008,12 +1113,34 @@ export class Simulation {
     return this.structures.filter((s) => s.tribeId === tribeId && types.includes(s.type)).length;
   }
 
+  tribeMorale(tribeId) {
+    const members = this.villagers.filter((v) => v.tribeId === tribeId && !v.dead);
+    if (!members.length) return 0;
+    return members.reduce((s, v) => s + v.mood, 0) / members.length;
+  }
+
+  tribeRelKey(a, b) {
+    return a < b ? `${a}:${b}` : `${b}:${a}`;
+  }
+
+  getTribeRel(a, b) {
+    if (a === b) return 100;
+    return this.tribeRelations[this.tribeRelKey(a, b)] ?? 0;
+  }
+
+  addTribeRel(a, b, delta) {
+    if (a === b) return;
+    const k = this.tribeRelKey(a, b);
+    this.tribeRelations[k] = clamp((this.tribeRelations[k] ?? 0) + delta, -100, 100);
+  }
+
   tickSplit() {
     if (this.splitCd > 0 || this.tribes.length >= 3) return;
     if (this.weather?.type === "hurricane") return;
     for (const tribe of [...this.tribes]) {
       const members = this.villagers.filter((v) => v.tribeId === tribe.id && !v.isChild && !v.migrating && v.age >= 16);
-      if (members.length < 7) continue;
+      if (members.length < 6) continue;
+      const morale = this.tribeMorale(tribe.id);
       let malcontent = null;
       let worst = 0;
       for (const v of members) {
@@ -1026,13 +1153,26 @@ export class Simulation {
           malcontent = v;
         }
       }
-      if (!malcontent || worst < 2) continue;
-      const friends = members.filter((o) => o.id !== malcontent.id && malcontent.affinityTo(o.id) >= 22);
-      const leaving = [malcontent, ...friends].slice(0, 4);
-      if (members.length - leaving.length < 4) continue;
+      // Hate clusters OR settlement harmony below 40%
+      const lowMorale = morale < 40 && members.length >= 7;
+      if (!malcontent && lowMorale) {
+        malcontent = members.sort((a, b) => a.mood - b.mood)[0];
+        worst = 2;
+      }
+      if (!malcontent || (worst < 2 && !lowMorale)) continue;
+      if (!lowMorale && worst < 2) continue;
+      const friends = members.filter((o) => o.id !== malcontent.id && (
+        malcontent.affinityTo(o.id) >= 18 || (lowMorale && o.mood < 45)
+      ));
+      const leaving = [malcontent, ...friends].slice(0, lowMorale ? 5 : 4);
+      if (members.length - leaving.length < 3) continue;
       const site = this.sampleFarTile(tribe);
       if (!site) continue;
       this.foundTribe(tribe, leaving, site);
+      this.addTribeRel(tribe.id, this.tribes[this.tribes.length - 1].id, lowMorale ? -25 : -40);
+      this.log(lowMorale
+        ? `Low harmony splits ${tribe.name} — pioneers leave for a colder fire.`
+        : `Hate kindles a schism from ${tribe.name}.`, "bad");
       return;
     }
   }
@@ -1067,9 +1207,16 @@ export class Simulation {
       food: Math.max(2, Math.round(oldTribe.food * 0.3)),
       wood: Math.max(2, Math.round(oldTribe.wood * 0.3)),
       stone: Math.max(0, Math.round(oldTribe.stone * 0.3)),
+      gold: Math.max(0, Math.round((oldTribe.gold || 0) * 0.25)),
+      gas: 0,
       expect: members.length,
       arrived: 0,
-      announced: false
+      announced: false,
+      leaderId: members[0]?.id ?? null,
+      isNation: false,
+      nationName: null,
+      govTitle: "Elder",
+      atWarWith: []
     };
     oldTribe.food -= tribe.food;
     oldTribe.wood -= tribe.wood;
@@ -1091,7 +1238,430 @@ export class Simulation {
       v.remember("We left the old fire", this.year);
     }
     this.splitCd = 110;
-    this.log(`A schism. ${members.map((m) => m.name).join(", ")} become the ${tribe.name}.`, "info");
+    this.log(`A schism. ${members.map((m) => m.displayName).join(", ")} become the ${tribe.name}.`, "info");
+    // New tribe starts cool toward parent
+    this.addTribeRel(oldTribe.id, tribe.id, -30);
+  }
+
+  tickFactionMissions(dt) {
+    if (this.tribes.length < 2) return;
+    this.factionAcc = (this.factionAcc || 0) + dt;
+    // Advance active missions
+    for (const m of this.factionMissions) {
+      m.t -= dt;
+      if (m.t > 0) continue;
+      const from = this.tribeOf(m.fromId);
+      const to = this.tribeOf(m.toId);
+      if (!from || !to) {
+        m.done = true;
+        continue;
+      }
+      if (m.type === "trade") {
+        const give = Math.min(4, Math.floor(from.food * 0.15));
+        const wood = Math.min(3, Math.floor(from.wood * 0.12));
+        from.food -= give;
+        from.wood -= wood;
+        to.food += give + 1;
+        to.wood += wood;
+        this.addTribeRel(from.id, to.id, 12);
+        this.log(`${from.name} traders reach ${to.name} (+${give} food).`, "good");
+        this.float(to.homeX, to.homeY - 20, "trade", "#8fd0a4");
+      } else if (m.type === "raid") {
+        const steal = Math.min(6, Math.floor(to.food * 0.2) + 1);
+        to.food = Math.max(0, to.food - steal);
+        from.food += Math.floor(steal * 0.7);
+        this.addTribeRel(from.id, to.id, -22);
+        // Injure a defender
+        const victim = this.villagers.find((v) => v.tribeId === to.id && !v.dead && !v.isChild);
+        if (victim) {
+          victim.injure("Torso", 12 + Math.random() * 10, this);
+          victim.safetyNeed = Math.max(0, victim.safetyNeed - 25);
+          victim.remember(`Raided by ${from.name}`, this.year);
+        }
+        this.log(`${from.name} raids ${to.name} — ${steal} food taken.`, "bad");
+        this.float(to.homeX, to.homeY - 20, "raid!", "#e07a62");
+      } else if (m.type === "gold_trade") {
+        const g = Math.min(3, Math.floor((from.gold || 0) * 0.25) + 1);
+        const food = Math.min(5, Math.floor(to.food * 0.1) + 1);
+        from.gold = Math.max(0, (from.gold || 0) - g);
+        to.gold = (to.gold || 0) + g;
+        to.food = Math.max(0, to.food - food);
+        from.food += food;
+        this.addTribeRel(from.id, to.id, 16);
+        this.log(`${from.name} exchange ${g} gold for ${food} food with ${to.name}.`, "good");
+        this.float(to.homeX, to.homeY - 20, "gold↔", "#f0d78c");
+      }
+      m.done = true;
+    }
+    this.factionMissions = this.factionMissions.filter((m) => !m.done);
+    if (this.factionAcc < 18) return;
+    this.factionAcc = 0;
+    if (this.factionMissions.length >= 2) return;
+    const a = this.tribes[(Math.random() * this.tribes.length) | 0];
+    const others = this.tribes.filter((t) => t.id !== a.id);
+    if (!others.length) return;
+    const b = others[(Math.random() * others.length) | 0];
+    const rel = this.getTribeRel(a.id, b.id);
+    const atWar = a.atWarWith?.includes(b.id) || b.atWarWith?.includes(a.id);
+    let type = "trade";
+    if (atWar) type = "raid";
+    else if ((a.isNation || b.isNation) && ((a.gold || 0) > 2 || (b.gold || 0) > 2) && rel > -5 && Math.random() < 0.45) type = "gold_trade";
+    else if (rel > 10 || (rel > -20 && Math.random() < 0.55)) type = "trade";
+    else type = "raid";
+    if (type === "trade" && a.food < 4) return;
+    if (type === "raid" && this.villagers.filter((v) => v.tribeId === a.id && !v.isChild).length < 3) return;
+    if (type === "gold_trade" && (a.gold || 0) < 1) type = "trade";
+    this.factionMissions.push({ type, fromId: a.id, toId: b.id, t: 6 + Math.random() * 5 });
+    const label = type === "gold_trade" ? "gold merchants" : type === "trade" ? "a trading caravan" : "a war band";
+    this.log(`${a.nationName || a.name} send ${label} toward ${b.nationName || b.name}.`, type === "raid" ? "bad" : "info");
+  }
+
+  tickNations(dt) {
+    this.nationAcc = (this.nationAcc || 0) + dt;
+    if (this.nationAcc < 10) return;
+    this.nationAcc = 0;
+    for (const tribe of this.tribes) {
+      tribe.gold = tribe.gold ?? 0;
+      tribe.gas = tribe.gas ?? 0;
+      tribe.atWarWith = tribe.atWarWith || [];
+      const pop = this.villagers.filter((v) => v.tribeId === tribe.id && !v.dead).length;
+      // Form a nation when large + cultured enough
+      if (!tribe.isNation && pop >= 9 && (this.hasTech("writing") || this.hasTech("laws") || this.eraIndex(this.era) >= 1)) {
+        tribe.isNation = true;
+        const root = tribe.name.replace(/kin$/i, "") || "Ash";
+        const suf = NATION_SUFFIX[(Math.random() * NATION_SUFFIX.length) | 0];
+        tribe.nationName = `${root}${suf}`;
+        tribe.govTitle = this.eraIndex(this.era) >= 3 ? "President" : this.eraIndex(this.era) >= 2 ? "King" : "Chief";
+        this.ensureLeader(tribe);
+        const leader = this.villagerById(tribe.leaderId);
+        this.log(`${tribe.name} becomes the nation of ${tribe.nationName}. ${leader?.displayName || "A leader"} is named ${tribe.govTitle}.`, "god");
+        this.float(tribe.homeX, tribe.homeY - 24, tribe.nationName, tribe.color);
+        this.sfx.push("era");
+      }
+      // Upgrade title with era
+      if (tribe.isNation) {
+        const want = this.eraIndex(this.era) >= 3 ? "President" : this.eraIndex(this.era) >= 2 ? "King" : "Chief";
+        if (tribe.govTitle !== want && this.eraIndex(this.era) >= 3) {
+          tribe.govTitle = "President";
+          this.holdElection(tribe);
+        } else if (tribe.govTitle === "Chief" && this.eraIndex(this.era) >= 2) {
+          tribe.govTitle = "King";
+          this.log(`${tribe.nationName || tribe.name} crowns a ${tribe.govTitle}.`, "god");
+        }
+      }
+      // Autonomously place mines / gas wells
+      if (pop >= 6 && tribe.wood >= 6 && tribe.stone >= 6 && !this.structures.some((s) => s.tribeId === tribe.id && s.type === "mine")) {
+        const ore = this.findOreNear(tribe, "gold");
+        if (ore && Math.random() < 0.4) {
+          this.blueprints.push({
+            id: this.nextId++, type: "mine", tx: ore.tx, ty: ore.ty, tribeId: tribe.id, progress: 0
+          });
+          tribe.wood -= 4;
+          tribe.stone -= 4;
+        }
+      }
+      if (this.eraIndex(this.era) >= 3 && pop >= 8 && tribe.stone >= 8
+        && !this.structures.some((s) => s.tribeId === tribe.id && s.type === "gaswell")) {
+        const gas = this.findOreNear(tribe, "gas");
+        if (gas && Math.random() < 0.35) {
+          this.blueprints.push({
+            id: this.nextId++, type: "gaswell", tx: gas.tx, ty: gas.ty, tribeId: tribe.id, progress: 0
+          });
+          tribe.wood -= 4;
+          tribe.stone -= 6;
+        }
+      }
+    }
+  }
+
+  findOreNear(tribe, res) {
+    const home = this.worldToTile(tribe.homeX, tribe.homeY);
+    let best = null;
+    let bestD = Infinity;
+    for (let ty = 0; ty < this.h; ty++) {
+      for (let tx = 0; tx < this.w; tx++) {
+        const t = this.getTile(tx, ty);
+        if (!t || t.res !== res) continue;
+        if (this.structures.some((s) => s.tx === tx && s.ty === ty)) continue;
+        const d = Math.hypot(tx - home.tx, ty - home.ty);
+        if (d < bestD && d < 28) {
+          bestD = d;
+          best = { tx, ty };
+        }
+      }
+    }
+    return best;
+  }
+
+  ensureLeader(tribe) {
+    if (tribe.leaderId && this.villagerById(tribe.leaderId) && !this.villagerById(tribe.leaderId).dead) return;
+    const candidates = this.villagers.filter((v) => v.tribeId === tribe.id && !v.dead && !v.isChild);
+    if (!candidates.length) {
+      tribe.leaderId = null;
+      return;
+    }
+    candidates.sort((a, b) =>
+      (b.skills?.lead || 0) - (a.skills?.lead || 0)
+      || (b.boldnessScore + b.empathyScore) - (a.boldnessScore + a.empathyScore)
+      || b.age - a.age
+    );
+    tribe.leaderId = candidates[0].id;
+    candidates[0].gainSkill?.("lead", 8);
+  }
+
+  holdElection(tribe) {
+    const adults = this.villagers.filter((v) => v.tribeId === tribe.id && !v.dead && !v.isChild && v.age >= 18);
+    if (adults.length < 2) return;
+    // Popularity = lead skill + empathy + age + random
+    const scored = adults.map((v) => ({
+      v,
+      score: (v.skills?.lead || 0) * 2 + v.empathyScore + v.age * 0.5 + Math.random() * 30 + (v.intelligence / 5)
+    })).sort((a, b) => b.score - a.score);
+    const winner = scored[0].v;
+    const prev = this.villagerById(tribe.leaderId);
+    tribe.leaderId = winner.id;
+    tribe.govTitle = "President";
+    winner.gainSkill?.("lead", 12);
+    winner.remember(`Elected President of ${tribe.nationName || tribe.name}`, this.year);
+    this.log(`${winner.displayName} is elected President of ${tribe.nationName || tribe.name}${prev && prev.id !== winner.id ? ` (succeeding ${prev.name})` : ""}.`, "god");
+    this.float(winner.x, winner.y - 20, "President", "#f0d78c");
+  }
+
+  tickWars(dt) {
+    this.warAcc = (this.warAcc || 0) + dt;
+    // Resolve ongoing wars
+    for (const w of this.wars) {
+      w.t -= dt;
+      w.clashAcc = (w.clashAcc || 0) + dt;
+      if (w.clashAcc > 4) {
+        w.clashAcc = 0;
+        this.resolveWarClash(w);
+      }
+      if (w.t <= 0) this.endWar(w, "stalemate");
+    }
+    this.wars = this.wars.filter((w) => !w.done);
+    if (this.warAcc < 22 || this.tribes.length < 2) return;
+    this.warAcc = 0;
+    // Chance to declare war between hostile nations/tribes
+    for (const a of this.tribes) {
+      for (const b of this.tribes) {
+        if (a.id >= b.id) continue;
+        if (a.atWarWith?.includes(b.id)) continue;
+        const rel = this.getTribeRel(a.id, b.id);
+        const popA = this.villagers.filter((v) => v.tribeId === a.id && !v.isChild).length;
+        const popB = this.villagers.filter((v) => v.tribeId === b.id && !v.isChild).length;
+        if (popA < 4 || popB < 4) continue;
+        if (rel < -35 && Math.random() < 0.35) {
+          this.declareWar(a, b);
+          return;
+        }
+        if ((a.isNation && b.isNation) && rel < -15 && Math.random() < 0.15) {
+          this.declareWar(a, b);
+          return;
+        }
+      }
+    }
+  }
+
+  declareWar(a, b) {
+    a.atWarWith = a.atWarWith || [];
+    b.atWarWith = b.atWarWith || [];
+    if (!a.atWarWith.includes(b.id)) a.atWarWith.push(b.id);
+    if (!b.atWarWith.includes(a.id)) b.atWarWith.push(a.id);
+    this.addTribeRel(a.id, b.id, -30);
+    this.wars.push({ a: a.id, b: b.id, t: 40 + Math.random() * 30, clashAcc: 0, done: false });
+    const na = a.nationName || a.name;
+    const nb = b.nationName || b.name;
+    this.log(`War! ${na} and ${nb} take up arms.`, "bad");
+    this.toast = { text: `War: ${na} vs ${nb}`, life: 5 };
+    this.sfx.push("storm");
+  }
+
+  resolveWarClash(w) {
+    const a = this.tribeOf(w.a);
+    const b = this.tribeOf(w.b);
+    if (!a || !b) {
+      w.done = true;
+      return;
+    }
+    const fightersA = this.villagers.filter((v) => v.tribeId === a.id && !v.dead && !v.isChild && v.age >= 16);
+    const fightersB = this.villagers.filter((v) => v.tribeId === b.id && !v.dead && !v.isChild && v.age >= 16);
+    if (!fightersA.length || !fightersB.length) {
+      this.endWar(w, !fightersA.length ? "b" : "a");
+      return;
+    }
+    const fa = fightersA[(Math.random() * fightersA.length) | 0];
+    const fb = fightersB[(Math.random() * fightersB.length) | 0];
+    // March toward enemy
+    const midX = (a.homeX + b.homeX) / 2;
+    const midY = (a.homeY + b.homeY) / 2;
+    fa.x += (midX - fa.x) * 0.15;
+    fa.y += (midY - fa.y) * 0.15;
+    fb.x += (midX - fb.x) * 0.15;
+    fb.y += (midY - fb.y) * 0.15;
+    fa.taskLabel = `At war with ${b.nationName || b.name}`;
+    fb.taskLabel = `At war with ${a.nationName || a.name}`;
+    const powA = 10 + (fa.skills?.combat || 0) * 0.4 + fa.boldnessScore * 0.05 + (this.hasTech("iron") ? 8 : 0);
+    const powB = 10 + (fb.skills?.combat || 0) * 0.4 + fb.boldnessScore * 0.05 + (this.hasTech("iron") ? 8 : 0);
+    const dmgA = 6 + Math.random() * powA * 0.4;
+    const dmgB = 6 + Math.random() * powB * 0.4;
+    fa.health -= dmgB;
+    fb.health -= dmgA;
+    fa.gainSkill?.("combat", 2);
+    fb.gainSkill?.("combat", 2);
+    fa.injure?.(Math.random() < 0.5 ? "LeftArm" : "Torso", dmgB * 0.4, this);
+    fb.injure?.(Math.random() < 0.5 ? "RightArm" : "Torso", dmgA * 0.4, this);
+    this.float(midX, midY - 10, "clash", "#e07a62");
+    if (fa.health <= 0) this.kill(fa, "wounds");
+    if (fb.health <= 0) this.kill(fb, "wounds");
+    // Steal gold on clash
+    if (Math.random() < 0.3 && (b.gold || 0) > 0) {
+      const g = 1;
+      b.gold -= g;
+      a.gold = (a.gold || 0) + g;
+    }
+    const leftA = this.villagers.filter((v) => v.tribeId === a.id && !v.dead && !v.isChild).length;
+    const leftB = this.villagers.filter((v) => v.tribeId === b.id && !v.dead && !v.isChild).length;
+    if (leftA < 2) this.endWar(w, "b");
+    else if (leftB < 2) this.endWar(w, "a");
+  }
+
+  endWar(w, winner) {
+    w.done = true;
+    const a = this.tribeOf(w.a);
+    const b = this.tribeOf(w.b);
+    if (a) a.atWarWith = (a.atWarWith || []).filter((id) => id !== w.b);
+    if (b) b.atWarWith = (b.atWarWith || []).filter((id) => id !== w.a);
+    if (winner === "stalemate") {
+      this.addTribeRel(w.a, w.b, 8);
+      this.log(`War ends in exhaustion between ${a?.nationName || a?.name} and ${b?.nationName || b?.name}.`, "info");
+      return;
+    }
+    const win = winner === "a" ? a : b;
+    const lose = winner === "a" ? b : a;
+    if (win && lose) {
+      const loot = Math.floor((lose.food || 0) * 0.25);
+      lose.food = Math.max(0, lose.food - loot);
+      win.food += loot;
+      win.gold = (win.gold || 0) + Math.floor((lose.gold || 0) * 0.4);
+      lose.gold = Math.floor((lose.gold || 0) * 0.6);
+      this.addTribeRel(win.id, lose.id, -10);
+      this.log(`${win.nationName || win.name} wins the war against ${lose.nationName || lose.name}.`, "bad");
+    }
+  }
+
+  tickEconomy(dt) {
+    this.economyAcc = (this.economyAcc || 0) + dt;
+    // Mines and gas wells produce slowly
+    for (const s of this.structures) {
+      const tribe = this.tribeOf(s.tribeId);
+      if (!tribe) continue;
+      if (s.type === "mine") {
+        tribe.gold = (tribe.gold || 0) + 0.08 * dt;
+        const t = this.getTile(s.tx, s.ty);
+        if (t?.res === "gold" && Math.random() < dt * 0.1) {
+          t.amount = Math.max(0, t.amount - 1);
+          tribe.gold += 0.5;
+          if (t.amount <= 0) t.res = null;
+        }
+      }
+      if (s.type === "gaswell" && this.eraIndex(this.era) >= 3) {
+        tribe.gas = (tribe.gas || 0) + 0.1 * dt;
+        const t = this.getTile(s.tx, s.ty);
+        if (t?.res === "gas" && Math.random() < dt * 0.08) {
+          t.amount = Math.max(0, t.amount - 1);
+          tribe.gas += 0.6;
+          if (t.amount <= 0) t.res = null;
+        }
+      }
+    }
+    if (this.economyAcc < 12) return;
+    this.economyAcc = 0;
+    // Local markets: skilled traders convert surplus food ↔ gold
+    for (const tribe of this.tribes) {
+      const trader = this.villagers.find((v) =>
+        v.tribeId === tribe.id && !v.dead && (v.skills?.trade || 0) > 15
+      );
+      if (!trader) continue;
+      if (tribe.food > this.tribePop(tribe.id) * 3 && Math.random() < 0.5) {
+        tribe.food -= 2;
+        tribe.gold = (tribe.gold || 0) + 1;
+        trader.gainSkill?.("trade", 1.5);
+        trader.personalGold = (trader.personalGold || 0) + 0.2;
+      } else if ((tribe.gold || 0) > 3 && tribe.food < this.tribePop(tribe.id) && Math.random() < 0.5) {
+        tribe.gold -= 1;
+        tribe.food += 3;
+        trader.gainSkill?.("trade", 1.5);
+      }
+    }
+  }
+
+  /** Soft autonomy — civilization doesn't wait on the player. */
+  tickAutonomousGod(dt) {
+    // Inventors push tech without Inspiration
+    if (Math.random() < dt * 0.04) {
+      const mind = this.villagers
+        .filter((v) => !v.dead && !v.isChild && (v.trait === "Inventive" || v.intelligence > 120 || (v.skills?.craft || 0) > 30))
+        .sort((a, b) => b.intelligence - a.intelligence)[0];
+      if (mind) {
+        const field = mind.aptitude || "tools";
+        const boost = 0.8 + (mind.skills?.craft || 0) * 0.02 + mind.intelligence / 200;
+        this.addInsight(field, boost, mind);
+        mind.gainSkill?.("craft", 0.4);
+      }
+    }
+    // Unanswered prayers slowly harden into self-reliance (not total ignore despair)
+    if (this.prayerRequest && this.prayerRequest.t < 8 && Math.random() < dt * 0.15) {
+      const v = this.villagerById(this.prayerRequest.familyIds?.[0]);
+      if (v) {
+        v.shiftPersonality?.(0, 2, 0, -2, "Learned to endure unanswered", this);
+        v.gainSkill?.("lead", 1);
+      }
+    }
+    // Periodic elections for presidential nations
+    if (Math.random() < dt * 0.008) {
+      for (const t of this.tribes) {
+        if (t.govTitle === "President" && Math.random() < 0.4) this.holdElection(t);
+      }
+    }
+  }
+
+  tickOfferings(dt) {
+    // Soft prompt: if shrine has offerings, nudge player via toast occasionally
+    for (const s of this.structures) {
+      if (s.type !== "shrine" || !s.offerings) continue;
+      const total = (s.offerings.food || 0) + (s.offerings.wood || 0) + (s.offerings.stone || 0);
+      if (total >= 3 && Math.random() < dt * 0.02 && !this.toast) {
+        this.toast = { text: "Offerings wait on the shrine — Bless near it to accept", life: 4 };
+      }
+    }
+  }
+
+  collectOfferingsNear(x, y) {
+    let collected = false;
+    for (const s of this.structures) {
+      if (s.type !== "shrine" || !s.offerings) continue;
+      const c = this.tileCenter(s.tx, s.ty);
+      if (Math.hypot(c.x - x, c.y - y) > 48) continue;
+      const o = s.offerings;
+      const total = (o.food || 0) + (o.wood || 0) + (o.stone || 0);
+      if (total <= 0) continue;
+      // God "accepts" — remove offerings, boost faith
+      s.offerings = { food: 0, wood: 0, stone: 0 };
+      collected = true;
+      this.godScore += 3;
+      this.witness(c.x, c.y, 100, (v) => {
+        v.religionBelief = Math.min(100, v.religionBelief + 14);
+        v.shiftPersonality?.(3, 0, 2, 10, "God accepted our sacrifice", this);
+        v.prayerBuffT = Math.max(v.prayerBuffT, 16);
+        v.remember("God accepted our sacrifice", this.year);
+        v.logInfluence?.("Sacrifice accepted", this.year);
+      });
+      this.burst(c.x, c.y - 8, "#f0d78c", 16);
+      this.float(c.x, c.y - 20, "accepted", "#f0d78c");
+      this.log("You accept the offerings on the shrine. Faith blooms.", "god");
+    }
+    return collected;
   }
 
   migrantArrived(v) {
@@ -1332,10 +1902,31 @@ export class Simulation {
       const stone = 1 + (bonus > 0 ? 1 : 0);
       if (tribe) tribe.stone += stone;
       this.addInsight("tools", 1.8, v);
+      v.gainSkill?.("mine", 1.2);
       this.burst(v.x, v.y, "#9aa0a6", 6);
       this.float(v.x, v.y - 12, `+${stone} stone`, "#d5d7dc");
       if (tile.amount <= 0) tile.res = null;
+    } else if (tile.res === "gold") {
+      tile.amount -= 1;
+      const g = 1 + ((v.skills?.mine || 0) > 40 ? 1 : 0);
+      if (tribe) tribe.gold = (tribe.gold || 0) + g + 1;
+      v.personalGold = (v.personalGold || 0) + 0.3;
+      v.gainSkill?.("mine", 2);
+      this.addInsight("tools", 1.2, v);
+      this.burst(v.x, v.y, "#f0d78c", 8);
+      this.float(v.x, v.y - 12, `+gold`, "#f0d78c");
+      if (tile.amount <= 0) tile.res = null;
+    } else if (tile.res === "gas") {
+      tile.amount -= 1;
+      if (tribe) tribe.gas = (tribe.gas || 0) + 1 + (this.hasTech("steam") ? 1 : 0);
+      v.gainSkill?.("mine", 1.5);
+      this.addInsight("fire", 1.4, v);
+      this.burst(v.x, v.y, "#9aa3ad", 6);
+      this.float(v.x, v.y - 12, `+gas`, "#a8b0b8");
+      if (tile.amount <= 0) tile.res = null;
     }
+    if (tile.res === "bush" || tile.res === "manna") v.gainSkill?.("forage", 1);
+    if (tile.res === "tree") v.gainSkill?.("craft", 0.8);
   }
 
   harvestFarm(v, tx, ty) {
@@ -1346,6 +1937,7 @@ export class Simulation {
     tile.growth = 0;
     if (tribe) tribe.food += amount;
     this.addInsight("food", tile.nearWater ? 2.4 : 1.6, v);
+    v.gainSkill?.("farm", 1.5);
     this.float(v.x, v.y - 12, `+${amount} food`, "#b7d48a");
     this.burst(v.x, v.y, "#d6c36a", 5);
   }
@@ -1365,10 +1957,13 @@ export class Simulation {
     this.blueprints = this.blueprints.filter((b) => b.id !== bp.id);
     const hpMap = {
       wall: 150,
+      mine: 120,
+      gaswell: 100,
       hut: this.hasTech("stronger_shelter") ? 170 : 110,
       shrine: 90,
       storage: 120,
       research: 100,
+      well: 95,
       workbench: 110,
       factory: 160,
       reactor: 200
@@ -1483,13 +2078,30 @@ export class Simulation {
     b.partnerId = a.id;
     a.addAffinity(b, 24);
     b.addAffinity(a, 24);
-    const bearer = a.energy <= b.energy ? a : b;
-    bearer.expecting = 22;
+    // Bond first; conception may follow later when fertile & close (real life)
+    if (a.canConceive && b.canConceive && Math.random() < 0.4) {
+      const bearer = a.sex === "f" ? a : b.sex === "f" ? b : (a.energy <= b.energy ? a : b);
+      bearer.expecting = this.yearLength * 0.72;
+      bearer.remember("A child begins", this.year);
+    }
     a.remember(`Started a family with ${b.name}`, this.year);
     b.remember(`Started a family with ${a.name}`, this.year);
-    this.log(`${a.name} and ${b.name} kindle a hearth together.`, "good");
+    this.log(`${a.displayName} and ${b.displayName} kindle a hearth together.`, "good");
     this.float((a.x + b.x) / 2, a.y - 18, "love", "#e2557a");
     this.sfx.push("birth");
+  }
+
+  get ambientTemp() {
+    // Rough °C feel by season + day/night — drives hypothermia & mood
+    const base = [12, 24, 14, -2][this.seasonIndex] ?? 12;
+    const nightMul = this.isNight() ? -8 : this.dayT > 0.35 && this.dayT < 0.55 ? 4 : 0;
+    const storm = this.weather?.type === "hurricane" ? -6 : this.weather?.type === "rain" ? -3 : 0;
+    return base + nightMul + storm;
+  }
+
+  get moonPhase() {
+    // 0..1 over ~8 days
+    return (this.time / (this.dayLength * 8)) % 1;
   }
 
   blendHex(a, b) {
@@ -1519,7 +2131,10 @@ export class Simulation {
     const stockOk = tribe && tribe.food >= Math.max(2, this.tribePop(tribe.id) * 0.35);
     if (tribe && tribe.food >= 2) tribe.food -= 2;
 
-    if (!stockOk && parent.empathyScore < -10 && parent.mood < 22 && Math.random() < 0.45) {
+    const stressed = (parent.mood ?? 50) < 20 || (partner.mood ?? 50) < 20;
+    const starving = parent.hunger > 90 || partner.hunger > 90 || !stockOk;
+    const selfish = parent.empathyScore < -15 || partner.empathyScore < -15;
+    if ((starving || stressed) && selfish && Math.random() < 0.5) {
       this.abandonInfant(parent, partner);
       return;
     }
@@ -1528,15 +2143,24 @@ export class Simulation {
     let iq = (parent.intelligence + partner.intelligence) / 2 + (Math.random() * 24 - 10);
     let gHealth = (parent.geneticHealth + partner.geneticHealth) / 2 - inbreed * 28;
     const hereditary = [...new Set([...(parent.hereditaryTraits || []), ...(partner.hereditaryTraits || [])])].slice(0, 3);
-    if (Math.random() < 0.05) {
-      const muts = ["Natural Genius", "Immune Boost", "Frailty", "Short Lifespan"];
+    const pt = this.worldToTile(parent.x, parent.y);
+    const parentTile = this.getTile(pt.tx, pt.ty);
+    const falloutBoost = (parentTile?.fallout || 0) > 0.3 || parent.illness?.type === "radiation" || partner.illness?.type === "radiation";
+    const mutChance = falloutBoost ? 0.22 : 0.05;
+    if (Math.random() < mutChance) {
+      const muts = falloutBoost
+        ? ["Natural Genius", "Immune Boost", "Frailty", "Short Lifespan", "Glow Skin", "Twisted Bone"]
+        : ["Natural Genius", "Immune Boost", "Frailty", "Short Lifespan"];
       const m = muts[(Math.random() * muts.length) | 0];
       hereditary.push(m);
       if (m === "Natural Genius") iq += 28;
       if (m === "Immune Boost") gHealth += 12;
-      if (m === "Frailty") gHealth -= 22;
+      if (m === "Frailty" || m === "Twisted Bone") gHealth -= 22;
       if (m === "Short Lifespan") gHealth -= 10;
-      this.log(`A mutation stirs in the bloodline: ${m}.`, "info");
+      if (m === "Glow Skin") gHealth -= 6;
+      this.log(falloutBoost
+        ? `Fallout twists a newborn's blood: ${m}.`
+        : `A mutation stirs in the bloodline: ${m}.`, falloutBoost ? "warn" : "info");
     }
     iq = clamp(iq * (1 - inbreed * 0.25), 20, 200);
     gHealth = clamp(gHealth, 15, 100);
@@ -1567,6 +2191,7 @@ export class Simulation {
       generation: Math.max(parent.generation || 0, partner.generation || 0) + 1,
       founderLineId: lineId,
       founderLineName: lineName,
+      surname: parent.surname || partner.surname || lineName,
       sex: Math.random() < 0.5 ? "m" : "f",
       empathyScore: clamp((parent.empathyScore + partner.empathyScore) / 2 + (Math.random() * 20 - 10), -100, 100),
       boldnessScore: clamp((parent.boldnessScore + partner.boldnessScore) / 2 + (Math.random() * 20 - 10), -100, 100),
@@ -1574,7 +2199,16 @@ export class Simulation {
       godAlignmentScore: clamp((parent.godAlignmentScore + partner.godAlignmentScore) / 2 + (Math.random() * 16 - 8), -100, 100),
       geneticHealth: gHealth,
       hereditaryTraits: hereditary,
-      inbreedingCoefficient: inbreed
+      inbreedingCoefficient: inbreed,
+      skills: {
+        forage: ((parent.skills?.forage || 10) + (partner.skills?.forage || 10)) / 4 + Math.random() * 8,
+        craft: ((parent.skills?.craft || 10) + (partner.skills?.craft || 10)) / 4 + Math.random() * 8,
+        farm: ((parent.skills?.farm || 8) + (partner.skills?.farm || 8)) / 4 + Math.random() * 6,
+        combat: ((parent.skills?.combat || 8) + (partner.skills?.combat || 8)) / 5 + Math.random() * 6,
+        mine: ((parent.skills?.mine || 5) + (partner.skills?.mine || 5)) / 5 + Math.random() * 4,
+        trade: ((parent.skills?.trade || 5) + (partner.skills?.trade || 5)) / 5 + Math.random() * 5,
+        lead: ((parent.skills?.lead || 5) + (partner.skills?.lead || 5)) / 6 + Math.random() * 4
+      }
     });
     child.syncTraitFromScores();
     this.addVillager(child);
@@ -1587,7 +2221,7 @@ export class Simulation {
     child.affinity.set(partner.id, 70);
     parent.remember(`A child arrived: ${child.name}`, this.year);
     partner.remember(`A child arrived: ${child.name}`, this.year);
-    this.log(`${child.name} is born to ${parent.name} and ${partner.name} (gen ${child.generation}).`, "good");
+    this.log(`${child.displayName} is born to ${parent.displayName} and ${partner.displayName} (gen ${child.generation}).`, "good");
     this.float(child.x, child.y - 10, child.name, "#f4efe6");
     this.sfx.push("baby");
     if (this.villagers.length <= 8) this.log("The hearth celebrates a birth.", "good");
@@ -1620,6 +2254,7 @@ export class Simulation {
     });
     orphan.orphan = true;
     orphan.abandoned = true;
+    orphan.surname = parent.surname || partner.surname || parent.founderLineName;
     orphan.say("…");
     this.addVillager(orphan);
     parent.remember(`Abandoned an infant`, this.year);
@@ -1637,7 +2272,10 @@ export class Simulation {
       this.log(`${carer.name} takes in the abandoned child ${orphan.name}.`, "good");
     } else {
       orphan.shiftPersonality(-8, 16, -10, -6, "Grew hardened alone", this);
-      orphan.traitTags.push("Hardened");
+      orphan.traitTags.push("Hardened", "Rebellious");
+      orphan.taskLabel = "Crying alone";
+      orphan.emoteLock = "broken";
+      orphan.emoteLockT = 12;
     }
   }
 
@@ -1645,29 +2283,77 @@ export class Simulation {
     if (v.dead) return;
     v.dead = true;
     const phrases = {
-      starvation: `${v.name} starves within sight of the fire.`,
-      "old age": `${v.name} returns to the soil, full of years.`,
-      wildfire: `${v.name} is taken by the wildfire.`,
-      lightning: `Lightning takes ${v.name}.`,
-      hurricane: `${v.name} is lost in the hurricane.`,
-      wounds: `${v.name} falls and does not rise.`
+      starvation: `${v.displayName} starves within sight of the fire.`,
+      "old age": `${v.displayName} returns to the soil, full of years.`,
+      wildfire: `${v.displayName} is taken by the wildfire.`,
+      lightning: `Lightning takes ${v.displayName}.`,
+      hurricane: `${v.displayName} is lost in the hurricane.`,
+      wounds: `${v.displayName} falls and does not rise.`
     };
-    this.log(phrases[cause] || `${v.name} dies.`, "bad");
+    this.log(phrases[cause] || `${v.displayName} dies.`, "bad");
     this.float(v.x, v.y - 12, v.name, "#e7e1d6");
     this.sfx.push("death");
+    this.graves.push({
+      x: v.x, y: v.y, forId: v.id, name: v.displayName, year: this.year, t: 120
+    });
+    if (this.graves.length > 24) this.graves.shift();
     for (const o of this.villagers) {
       if (o.id === v.id || o.dead) continue;
       if (o.partnerId === v.id) {
         o.partnerId = null;
         o.grief = 46;
         o.expecting = 0;
+        o.graveX = v.x;
+        o.graveY = v.y;
         o.remember(`Lost ${v.name}`, this.year);
-      } else if (o.affinityTo(v.id) > 40) {
+        if (Math.random() < 0.55) o.beginBreakdown?.(this, "mourner");
+      } else if (o.affinityTo(v.id) > 40 || (o.parentIds || []).includes(v.id) || (v.parentIds || []).includes(o.id)) {
         o.remember(`Mourned ${v.name}`, this.year);
         o.grief = Math.max(o.grief, 18);
+        o.graveX = v.x;
+        o.graveY = v.y;
       }
     }
+    this.succeedLeader(v);
     if (this.selectedId === v.id) this.selectedId = null;
+  }
+
+  succeedLeader(dead) {
+    for (const tribe of this.tribes) {
+      if (tribe.leaderId !== dead.id) continue;
+      const kin = this.villagers.filter((o) =>
+        !o.dead && o.tribeId === tribe.id && !o.isChild && o.id !== dead.id && (
+          (dead.children || []).includes(o.id)
+          || (o.parentIds || []).includes(dead.id)
+          || o.surname === dead.surname
+          || o.founderLineId === dead.founderLineId
+        )
+      );
+      let heir = null;
+      if (kin.length) {
+        heir = kin.sort((a, b) => {
+          const childA = (dead.children || []).includes(a.id) ? 1 : 0;
+          const childB = (dead.children || []).includes(b.id) ? 1 : 0;
+          if (childB !== childA) return childB - childA;
+          return b.age - a.age || dead.affinityTo?.(b.id) - dead.affinityTo?.(a.id);
+        })[0];
+      }
+      if (!heir) {
+        heir = this.villagers
+          .filter((o) => !o.dead && o.tribeId === tribe.id && !o.isChild && o.id !== dead.id)
+          .sort((a, b) => (b.affinityTo(dead.id) - a.affinityTo(dead.id)) || b.age - a.age)[0];
+      }
+      if (heir) {
+        tribe.leaderId = heir.id;
+        heir.shiftPersonality?.(4, 6, 2, 4, "Inherited tribal leadership", this);
+        heir.socialNeed = Math.min(100, heir.socialNeed + 15);
+        heir.remember(`Became elder of ${tribe.name}`, this.year);
+        this.log(`${heir.displayName} inherits leadership of ${tribe.name}.`, "god");
+        this.float(heir.x, heir.y - 18, "elder", "#f0d78c");
+      } else {
+        tribe.leaderId = null;
+      }
+    }
   }
 
   resolveHurricane() {
@@ -1705,14 +2391,24 @@ export class Simulation {
   }
 
   castBless(v) {
-    if (!v) return this.log("No one stands there to receive it.", "info");
     if (!this.powerReady("bless")) return this.log("Mercy needs a breath.", "info");
+    const ox = v ? v.x : this.cursor?.x;
+    const oy = v ? v.y : this.cursor?.y;
+    if (ox != null && this.collectOfferingsNear(ox, oy) && !v) {
+      this.spend("bless");
+      return;
+    }
+    if (!v) return this.log("No one stands there to receive it.", "info");
     this.spend("bless");
+    this.collectOfferingsNear(v.x, v.y);
     v.hunger = Math.max(0, v.hunger - 70);
     v.health = Math.min(100, v.health + 55);
     v.energy = Math.min(100, v.energy + 28);
     v.religionBelief = Math.min(100, v.religionBelief + 18);
+    v.socialNeed = Math.min(100, (v.socialNeed || 50) + 20);
+    v.safetyNeed = Math.min(100, (v.safetyNeed || 50) + 25);
     v.illness = null;
+    v.breakdown = null;
     v.healBody?.(55);
     v.shiftPersonality?.(8, 2, 4, 18, "Healed by a divine hand", this);
     v.logInfluence?.("Blessed by God", this.year);
@@ -1729,7 +2425,31 @@ export class Simulation {
       o.religionBelief = Math.min(100, o.religionBelief + 6);
       o.shiftPersonality?.(2, 0, 1, 4, "Witnessed a blessing", this);
     });
-    this.log(`A blessing settles on ${v.name}.`, "god");
+    this.log(`A blessing settles on ${v.displayName}.`, "god");
+  }
+
+  forceRest(selectedId = null) {
+    const targets = [];
+    if (selectedId) {
+      const v = this.villagerById(selectedId);
+      if (v && !v.dead) targets.push(v);
+    } else {
+      for (const v of this.villagers) {
+        if (!v.dead && !v.isChild && (v.energy < 70 || this.isNight())) targets.push(v);
+      }
+    }
+    if (!targets.length) return this.log("No one needs rest right now.", "info");
+    for (const v of targets) {
+      if (v.possessed) continue;
+      v.beginSleep(this);
+      v.taskLabel = "Resting by divine leave";
+      v.say(v.trait === "Lazy" ? "Finally." : "I will close my eyes.");
+      this.float(v.x, v.y - 14, "zzz", "#c9b8e8");
+    }
+    this.log(targets.length === 1
+      ? `${targets[0].name} lies down to rest.`
+      : `${targets.length} villagers settle to sleep.`, "god");
+    this.sfx.push("click");
   }
 
   castWhisper(v, intent) {
@@ -1741,7 +2461,35 @@ export class Simulation {
     if (v.godAlignmentScore < -30 || v.traitTags.includes("Rebellious") || v.traitTags.includes("Godless")) chance = 0.4;
     const obey = Math.random() < chance;
     const defy = !obey && (v.godAlignmentScore < -30 || Math.random() < 0.35);
-    this.burst(v.x, v.y - 10, "#f0d78c", 14);
+    const ox = this.camHomeX ?? this.homeX;
+    const oy = (this.camHomeY ?? this.homeY) - 80;
+    for (let i = 0; i < 28; i++) {
+      const t = i / 28;
+      const sway = Math.sin(t * Math.PI * 3) * 10;
+      this.fx.push({
+        x: ox + (v.x - ox) * t + sway + (Math.random() * 4 - 2),
+        y: oy + (v.y - 12 - oy) * t + Math.cos(t * 10) * 4,
+        vx: (Math.random() - 0.5) * 6,
+        vy: -4 - Math.random() * 10,
+        life: 0.9 + Math.random() * 0.5,
+        max: 1.4,
+        color: i % 3 === 0 ? "#fff6c8" : "#f0d78c",
+        size: 1 + (i % 3 === 0 ? 2 : 1)
+      });
+    }
+    for (let i = 0; i < 10; i++) {
+      this.fx.push({
+        x: v.x + (Math.random() * 10 - 5),
+        y: v.y - 8 - Math.random() * 10,
+        vx: (Math.random() - 0.5) * 12,
+        vy: -14 - Math.random() * 10,
+        life: 0.6 + Math.random() * 0.4,
+        max: 1,
+        color: "#ffe9a0",
+        size: 2
+      });
+    }
+    this.burst(v.x, v.y - 10, "#f0d78c", 18);
     this.float(v.x, v.y - 22, defy ? "defies" : obey ? "hears" : "wavers", "#f0d78c");
     v.logInfluence(`Whisper: ${intent}${defy ? " (defied)" : obey ? "" : " (ignored)"}`, this.year);
     const doIntent = defy
@@ -1848,7 +2596,7 @@ export class Simulation {
         }
       } else {
         this.prayerRequest = {
-          text: pickPrayer(),
+          text: pickPrayer(this),
           t: 28,
           familyIds: this.villagers.filter((v) => v.godAlignmentScore > 10).slice(0, 4).map((v) => v.id)
         };
@@ -1949,7 +2697,7 @@ export class Simulation {
     if (!this.prayerRequest) {
       if (Math.random() < dt * 0.015 && this.villagers.some((v) => v.godAlignmentScore > 20)) {
         this.prayerRequest = {
-          text: pickPrayer(),
+          text: pickPrayer(this),
           t: 30,
           familyIds: this.villagers.filter((v) => v.religionBelief > 30).slice(0, 5).map((v) => v.id)
         };
@@ -1993,6 +2741,140 @@ export class Simulation {
       else adults++;
     }
     return { total: this.villagers.length, adults, children };
+  }
+
+  getGoals() {
+    return GOAL_DEFS.map((g) => {
+      const done = !!(this.goalsDone?.[g.id] || g.test(this));
+      return { id: g.id, label: g.label, done };
+    });
+  }
+
+  tickGoals() {
+    if (!this.goalsDone) this.goalsDone = {};
+    for (const g of GOAL_DEFS) {
+      if (this.goalsDone[g.id]) continue;
+      if (g.test(this)) {
+        this.goalsDone[g.id] = true;
+        this.log(`Goal complete: ${g.label}`, "good");
+        this.sfx.push("discover");
+        for (const v of this.villagers) {
+          v.shiftPersonality?.(2, 1, 2, 1, "Celebrated a people goal", this);
+        }
+      }
+    }
+  }
+
+  tickFestival(dt) {
+    this.festivalCd = Math.max(0, (this.festivalCd || 0) - dt);
+    if (this.festival) {
+      this.festival.t -= dt;
+      for (const v of this.villagers) {
+        if (Math.hypot(v.x - this.festival.x, v.y - this.festival.y) < 70) {
+          v.hunger = Math.max(0, v.hunger - 2.5 * dt);
+          v.energy = Math.min(100, v.energy + 1.2 * dt);
+          if (Math.random() < dt * 0.4) {
+            this.fx.push({
+              x: v.x + (Math.random() * 10 - 5),
+              y: v.y - 10,
+              vx: (Math.random() - 0.5) * 8,
+              vy: -20,
+              life: 0.7,
+              max: 0.7,
+              color: ["#f0d78c", "#e2557a", "#8fd0a4", "#6fa8c9"][(Math.random() * 4) | 0],
+              size: 2
+            });
+          }
+        }
+      }
+      if (this.festival.t <= 0) {
+        this.log("The festival ends. Stories linger by the fire.", "good");
+        this.festival = null;
+        this.festivalCd = 55;
+      }
+      return;
+    }
+    if (this.festivalCd > 0) return;
+    const pop = this.villagers.length;
+    if (pop < 4 || this.morale < 58 || this.totalStock().food < pop) {
+      this.festivalCd = 12;
+      return;
+    }
+    if (Math.random() < dt * 0.08) this.startFestival();
+  }
+
+  startFestival() {
+    const tribe = this.tribes[0];
+    if (!tribe) return;
+    tribe.food = Math.max(0, tribe.food - Math.max(2, Math.floor(this.villagers.length * 0.35)));
+    this.festival = { x: tribe.homeX, y: tribe.homeY, t: 14 };
+    this.goalsDone = this.goalsDone || {};
+    this.goalsDone.festival = true;
+    this.log("A festival kindles — drums, food, and laughter under your sky.", "good");
+    this.sfx.push("birth");
+    for (const v of this.villagers) {
+      v.shiftPersonality?.(4, 2, 6, 3, "Danced at a festival", this);
+      v.emoteLock = "love";
+      v.emoteLockT = 3;
+    }
+  }
+
+  tickQuake(dt) {
+    if ((this.quakeT || 0) <= 0) return;
+    this.quakeT -= dt;
+    this.flash = Math.max(this.flash, 0.25);
+    if (Math.random() < dt * 6) {
+      const s = this.structures[(Math.random() * this.structures.length) | 0];
+      if (s) this.damageStructure(s, 8 + Math.random() * 10, "quake");
+    }
+    for (const v of this.villagers) {
+      this.tryMove(v, (Math.random() - 0.5) * 40 * dt, (Math.random() - 0.5) * 40 * dt);
+      if (Math.random() < dt * 0.5) v.injure?.(Math.random() < 0.5 ? "LeftLeg" : "RightLeg", 4, this);
+    }
+  }
+
+  castRain(x, y) {
+    if (!this.powerReady("rain")) return this.log("The clouds are still elsewhere.", "info");
+    this.spend("rain");
+    this.weather = { type: "rain", t: 0, dur: 12, eyeX: x, eyeY: y };
+    this.godScore += 1;
+    this.godMemory = Math.max(this.godMemory, 10);
+    for (const t of this.tiles) {
+      if (t.type === "farm") t.growth = Math.min(1.4, (t.growth || 0) + 0.12);
+      if (t.fire > 0) t.fire *= 0.4;
+    }
+    this.witness(x, y, 160, (v) => {
+      v.religionBelief = Math.min(100, v.religionBelief + 5);
+      v.shiftPersonality?.(1, 0, 1, 6, "Felt blessed rain", this);
+    });
+    this.log("Gentle rain answers your hand. Fires hiss; crops drink.", "god");
+    this.sfx.push("bless");
+  }
+
+  castQuake(x, y) {
+    if (!this.powerReady("quake")) return this.log("The earth will not answer yet.", "info");
+    this.spend("quake");
+    this.quakeT = 4.5;
+    this.natureScore += 2;
+    this.lastDisaster = "quake";
+    this.flash = 1;
+    {
+      const tile = this.worldToTile(x, y);
+      this.invalidatePathsNear(tile.tx, tile.ty, 6);
+    }
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2;
+      const px = x + Math.cos(ang) * (20 + Math.random() * 16);
+      const py = y + Math.sin(ang) * (16 + Math.random() * 12);
+      if (Math.random() < 0.45) this.paintBrush(px, py, "raise");
+      else this.paintBrush(px, py, "dig");
+    }
+    this.witness(x, y, 140, (v) => {
+      v.religionBelief = Math.min(100, v.religionBelief + (v.trait === "Devout" ? 10 : 3));
+      v.remember("The ground roared like a beast", this.year);
+    });
+    this.log("The land buckles. Walls shudder.", "bad");
+    this.sfx.push("storm");
   }
 
   clearPossession() {
@@ -2118,7 +3000,7 @@ export class Simulation {
         this.terrainDirty = true;
       }
     } else if (mode === "game") {
-      this.spawnAnimal(x, y, Math.random() < 0.72 ? "deer" : "wolf");
+      this.spawnAnimal(x, y, this.pickWildKind());
     }
   }
 
@@ -2173,8 +3055,38 @@ export class Simulation {
     });
   }
 
+  pickWildKind(nearWater = false) {
+    const roll = Math.random();
+    if (nearWater) {
+      if (roll < 0.35) return "beaver";
+      if (roll < 0.5) return "snake";
+      if (roll < 0.65) return "deer";
+      if (roll < 0.8) return "moose";
+      return "fox";
+    }
+    if (roll < 0.14) return "deer";
+    if (roll < 0.22) return "rabbit";
+    if (roll < 0.3) return "fox";
+    if (roll < 0.37) return "chicken";
+    if (roll < 0.44) return "sheep";
+    if (roll < 0.5) return "goat";
+    if (roll < 0.56) return "pig";
+    if (roll < 0.62) return "boar";
+    if (roll < 0.68) return "cattle";
+    if (roll < 0.74) return "horse";
+    if (roll < 0.8) return "wolf";
+    if (roll < 0.86) return "moose";
+    if (roll < 0.91) return "bear";
+    if (roll < 0.95) return "snake";
+    if (roll < 0.98) return "beaver";
+    return ANIMAL_KINDS[(Math.random() * ANIMAL_KINDS.length) | 0];
+  }
+
   spawnAnimal(x, y, kind = "deer") {
-    if (this.animals.length > 28) this.animals.shift();
+    if (!ANIMAL_KINDS.includes(kind)) kind = "deer";
+    if (this.animals.length > 64) this.animals.shift();
+    const hp = ANIMAL_HP[kind] || 18;
+    const canDom = kind === "cattle" || kind === "sheep" || kind === "goat" || kind === "chicken" || kind === "pig" || kind === "horse";
     this.animals.push({
       id: this.nextId++,
       kind,
@@ -2183,20 +3095,30 @@ export class Simulation {
       vx: 0,
       vy: 0,
       phase: Math.random() * 10,
-      hp: kind === "wolf" ? 28 : 18,
-      migrate: false
+      hp,
+      migrate: false,
+      domestic: canDom && Math.random() < (kind === "chicken" || kind === "sheep" ? 0.45 : 0.28)
     });
     this.float(x, y - 8, kind, "#d7c4a2");
   }
 
   seedWildlife() {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 22; i++) {
       const tx = 4 + ((Math.random() * (this.w - 8)) | 0);
       const ty = 4 + ((Math.random() * (this.h - 8)) | 0);
       const t = this.getTile(tx, ty);
-      if (!t || t.type !== "grass") continue;
+      if (!t || (t.type !== "grass" && t.type !== "sand")) continue;
+      let nearWater = false;
+      for (let oy = -2; oy <= 2 && !nearWater; oy++) {
+        for (let ox = -2; ox <= 2; ox++) {
+          if (this.getTile(tx + ox, ty + oy)?.type === "water") {
+            nearWater = true;
+            break;
+          }
+        }
+      }
       const c = this.tileCenter(tx, ty);
-      this.spawnAnimal(c.x, c.y, Math.random() < 0.75 ? "deer" : "wolf");
+      this.spawnAnimal(c.x, c.y, this.pickWildKind(nearWater));
     }
   }
 
@@ -2213,19 +3135,49 @@ export class Simulation {
     return s;
   }
 
+  nearestTribeAt(x, y) {
+    let nearest = null;
+    let nd = Infinity;
+    for (const tr of this.tribes) {
+      const d = Math.hypot(tr.homeX - x, tr.homeY - y);
+      if (d < nd) {
+        nd = d;
+        nearest = tr;
+      }
+    }
+    return { tribe: nearest, dist: nd };
+  }
+
   tickAnimals(dt) {
     if (!this.animals.length && this.time > 8 && Math.random() < dt * 0.05) this.seedWildlife();
+    const preyKinds = new Set(["deer", "rabbit", "sheep", "chicken", "cattle", "goat", "pig", "horse", "moose"]);
     for (const a of this.animals) {
       a.phase += dt;
       const tile = this.worldToTile(a.x, a.y);
-      const score = this.forestScore(tile.tx, tile.ty);
+      let score = this.forestScore(tile.tx, tile.ty);
+      // Habitat bias
+      if (a.kind === "beaver" || a.kind === "snake" || a.kind === "moose") {
+        for (let oy = -2; oy <= 2; oy++) {
+          for (let ox = -2; ox <= 2; ox++) {
+            if (this.getTile(tile.tx + ox, tile.ty + oy)?.type === "water") score += 3;
+          }
+        }
+      }
+      if (a.kind === "rabbit" || a.kind === "chicken") score += 1.5;
       if (a.migrate || score < 2) {
         let best = null;
         let bestS = -Infinity;
         for (let i = 0; i < 6; i++) {
           const tx = ((Math.random() * this.w) | 0);
           const ty = ((Math.random() * this.h) | 0);
-          const s = this.forestScore(tx, ty);
+          let s = this.forestScore(tx, ty);
+          if (a.kind === "beaver" || a.kind === "snake") {
+            for (let oy = -2; oy <= 2; oy++) {
+              for (let ox = -2; ox <= 2; ox++) {
+                if (this.getTile(tx + ox, ty + oy)?.type === "water") s += 4;
+              }
+            }
+          }
           if (s > bestS) {
             bestS = s;
             best = this.tileCenter(tx, ty);
@@ -2242,7 +3194,7 @@ export class Simulation {
         a.vx *= 0.96;
         a.vy *= 0.96;
       }
-      const speed = a.kind === "wolf" ? 28 : 20;
+      const speed = ANIMAL_SPEED[a.kind] || 20;
       const len = Math.hypot(a.vx, a.vy) || 1;
       const nx = a.x + (a.vx / len) * Math.min(len, speed) * dt;
       const ny = a.y + (a.vy / len) * Math.min(len, speed) * dt;
@@ -2250,23 +3202,74 @@ export class Simulation {
         a.x = nx;
         a.y = ny;
       }
-      if (a.kind === "wolf" && Math.random() < dt * 0.12) {
-        const prey = this.pickVillager(a.x, a.y, 22);
-        if (prey && !prey.dead) {
-          prey.injure("Torso", 8 + Math.random() * 10, this);
-          prey.injure(Math.random() < 0.5 ? "LeftArm" : "RightArm", 6, this);
-          prey.remember("Mauled by a wolf", this.year);
-          prey.shiftPersonality(-2, prey.health > 55 ? 8 : -10, -4, 0, "Beast attack", this);
-          this.float(prey.x, prey.y - 14, "wolf!", "#e07a62");
+
+      // Predators
+      if (a.kind === "wolf" || a.kind === "bear" || a.kind === "snake") {
+        const rate = a.kind === "bear" ? 0.08 : a.kind === "snake" ? 0.1 : 0.12;
+        const reach = a.kind === "bear" ? 26 : a.kind === "snake" ? 14 : 22;
+        if (Math.random() < dt * rate) {
+          const prey = this.pickVillager(a.x, a.y, reach);
+          if (prey && !prey.dead) {
+            const dmg = a.kind === "bear" ? 14 + Math.random() * 12 : a.kind === "snake" ? 5 + Math.random() * 6 : 8 + Math.random() * 10;
+            prey.injure("Torso", dmg, this);
+            if (a.kind !== "snake") prey.injure(Math.random() < 0.5 ? "LeftArm" : "RightArm", 5, this);
+            if (a.kind === "snake" && Math.random() < 0.35) prey.catchIllness?.("flu", 8);
+            prey.remember(a.kind === "bear" ? "Mauled by a bear" : a.kind === "snake" ? "Bitten by a snake" : "Mauled by a wolf", this.year);
+            prey.shiftPersonality(-2, prey.health > 55 ? 8 : -10, -4, 0, "Beast attack", this);
+            this.float(prey.x, prey.y - 14, `${a.kind}!`, "#e07a62");
+          }
+          if (a.kind !== "snake") {
+            const beast = this.animals.find((o) =>
+              o.id !== a.id && preyKinds.has(o.kind) && !o.domestic && Math.hypot(o.x - a.x, o.y - a.y) < reach + 4
+            );
+            if (beast) {
+              beast.hp -= a.kind === "bear" ? 14 : 8;
+              if (beast.hp <= 0) {
+                this.animals = this.animals.filter((o) => o.id !== beast.id);
+                this.float(beast.x, beast.y - 8, "kill", "#e07a62");
+              }
+            }
+          }
+        }
+      }
+
+      // Livestock / domesticables feed tribes
+      const livestock = a.kind === "cattle" || a.kind === "sheep" || a.kind === "goat" || a.kind === "chicken" || a.kind === "pig" || a.kind === "horse";
+      if (livestock && (a.domestic || Math.random() < dt * 0.02)) {
+        const { tribe, dist } = this.nearestTribeAt(a.x, a.y);
+        if (tribe && dist < 90 && Math.random() < dt * 0.15) {
+          a.domestic = true;
+          const yieldFood = a.kind === "cattle" ? 0.35 : a.kind === "pig" ? 0.3 : a.kind === "sheep" || a.kind === "goat" ? 0.22 : a.kind === "horse" ? 0.12 : 0.1;
+          tribe.food += yieldFood;
+        }
+      }
+
+      // Beavers occasionally plant a bush near water
+      if (a.kind === "beaver" && Math.random() < dt * 0.04) {
+        const t = this.getTile(tile.tx, tile.ty);
+        if (t && t.type === "grass" && !t.res && Math.random() < 0.4) {
+          t.res = "bush";
+          t.amount = 2;
+          t.max = 3;
+          this.terrainDirty = true;
         }
       }
     }
-    if (this.animals.length < 6 && Math.random() < dt * 0.02) {
+    if (this.animals.length < 16 && Math.random() < dt * 0.03) {
       const tx = 3 + ((Math.random() * (this.w - 6)) | 0);
       const ty = 3 + ((Math.random() * (this.h - 6)) | 0);
-      if (this.forestScore(tx, ty) > 4) {
+      if (this.forestScore(tx, ty) > 2) {
         const c = this.tileCenter(tx, ty);
-        this.spawnAnimal(c.x, c.y, "deer");
+        let nearWater = false;
+        for (let oy = -2; oy <= 2 && !nearWater; oy++) {
+          for (let ox = -2; ox <= 2; ox++) {
+            if (this.getTile(tx + ox, ty + oy)?.type === "water") {
+              nearWater = true;
+              break;
+            }
+          }
+        }
+        this.spawnAnimal(c.x, c.y, this.pickWildKind(nearWater));
       }
     }
   }
@@ -2389,9 +3392,18 @@ export class Simulation {
         personalityXP: v.personalityXP, traitTags: v.traitTags, influenceHistory: v.influenceHistory,
         geneticHealth: v.geneticHealth, hereditaryTraits: v.hereditaryTraits,
         inbreedingCoefficient: v.inbreedingCoefficient, illness: v.illness, orphan: v.orphan,
-        body: v.body, prosthetics: v.prosthetics
+        body: v.body, prosthetics: v.prosthetics,
+        socialNeed: v.socialNeed, safetyNeed: v.safetyNeed, surname: v.surname,
+        vaccineProgress: v.vaccineProgress || 0,
+        skills: v.skills, personalGold: v.personalGold || 0
       })),
-      animals: this.animals.map((a) => ({ ...a }))
+      animals: this.animals.map((a) => ({ ...a })),
+      goalsDone: { ...(this.goalsDone || {}) },
+      festivalCd: this.festivalCd || 0,
+      graves: (this.graves || []).slice(-16),
+      vaccineReady: !!this.vaccineReady,
+      tribeRelations: { ...(this.tribeRelations || {}) },
+      wars: (this.wars || []).filter((w) => !w.done)
     };
   }
 
@@ -2437,7 +3449,7 @@ export class Simulation {
     sim.hoveredId = null;
     sim.activePower = "inspect";
     sim.cursor = null;
-    sim.cooldowns = { bless: 0, inspire: 0, food: 0, lightning: 0, hurricane: 0, wildfire: 0, hut: 0, whisper: 0, possess: 0 };
+    sim.cooldowns = { bless: 0, inspire: 0, food: 0, lightning: 0, hurricane: 0, wildfire: 0, hut: 0, whisper: 0, possess: 0, rain: 0, quake: 0 };
     sim.cooldownMax = POWER_MAX;
     sim.toast = { text: "Restored local save", life: 3 };
     sim.over = false;
@@ -2447,6 +3459,25 @@ export class Simulation {
     sim.brushMode = null;
     sim.animals = (data.animals || []).map((a) => ({ ...a }));
     sim.pollutionAcc = 0;
+    sim.festival = null;
+    sim.festivalCd = data.festivalCd || 20;
+    sim.graves = data.graves || [];
+    sim.vaccineReady = !!data.vaccineReady;
+    sim.factionMissions = [];
+    sim.factionAcc = 0;
+    sim.tribeRelations = data.tribeRelations || {};
+    sim.wars = data.wars || [];
+    sim.warAcc = 0;
+    sim.nationAcc = 0;
+    sim.economyAcc = 0;
+    for (const t of sim.tribes) {
+      t.gold = t.gold ?? 0;
+      t.gas = t.gas ?? 0;
+      t.atWarWith = t.atWarWith || [];
+      t.govTitle = t.govTitle || "Elder";
+    }
+    sim.goalsDone = data.goalsDone || {};
+    sim.quakeT = 0;
     sim.godMemory = 0;
     sim.lastDisaster = null;
     sim.fireSeen = false;
@@ -2503,6 +3534,10 @@ export class Simulation {
 
   castFood(x, y) {
     if (!this.powerReady("food")) return this.log("The sky is empty for a moment.", "info");
+    if (this.collectOfferingsNear(x, y)) {
+      this.spend("food");
+      return;
+    }
     const t = this.worldToTile(x, y);
     const tile = this.getTile(t.tx, t.ty);
     if (!tile || tile.type === "water" || tile.type === "rock") return this.log("There is nowhere to lay the gift.", "info");
@@ -2633,10 +3668,14 @@ export class Simulation {
 
   pickVillager(x, y, radius = 18) {
     let best = null;
-    let d = radius;
+    let d = radius + 6;
     for (const v of this.villagers) {
-      const reach = v.isChild ? 12 : radius;
-      const dd = Math.hypot(v.x - x, v.y - 8 - y);
+      let reach = v.isChild ? 12 : radius;
+      if (v.dilemma) reach = Math.max(reach, 26);
+      if (v.job?.type === "sleep") reach = Math.max(reach, 22);
+      if (v.carried) reach = Math.max(reach, 24);
+      const cy = v.job?.type === "sleep" ? v.y - 4 : v.y - 8;
+      const dd = Math.hypot(v.x - x, cy - y);
       if (dd < d && dd < reach) {
         d = dd;
         best = v;

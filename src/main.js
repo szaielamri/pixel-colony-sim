@@ -13,17 +13,19 @@ const renderer = new Renderer(canvas);
 const HINTS = {
   inspect: "Tap a villager to inspect. Hold dilemmas ❓ to guide them.",
   possess: "Click a villager to possess. WASD/arrows move · Space acts · Esc frees them.",
-  bless: "Bless a villager — heal, feed, clear sickness.",
+  bless: "Bless a villager — or accept shrine offerings.",
   inspire: "Strike a villager with an idea.",
   whisper: "Whisper a divine command to a villager.",
   food: "Drop manna on the land.",
   lightning: "Call down lightning.",
   hurricane: "Set a hurricane's eye.",
   wildfire: "Kindle wildfire.",
-  hut: "Mark a hut (needs Mud Huts tech + 10 wood)."
+  hut: "Mark a hut (needs Mud Huts tech + 10 wood).",
+  rain: "Call gentle rain — cools fire, feeds farms, raises faith.",
+  quake: "Shake the land — cracks earth, damages buildings."
 };
 
-const GROUND = new Set(["food", "lightning", "hurricane", "wildfire", "hut"]);
+const GROUND = new Set(["food", "lightning", "hurricane", "wildfire", "hut", "rain", "quake"]);
 const PERSON = new Set(["bless", "inspire", "whisper", "possess"]);
 const KEYS = {
   Digit1: "inspect",
@@ -33,11 +35,14 @@ const KEYS = {
   Digit5: "lightning",
   Digit6: "hurricane",
   Digit7: "wildfire",
-  Digit8: "hut",
+  Digit8: "rain",
   Digit9: "whisper",
   Digit0: "possess",
-  KeyP: "possess"
+  KeyP: "possess",
+  KeyQ: "quake"
 };
+
+const TUTORIAL_KEY = "emberkin_tutorial_v1";
 
 const MOVE_KEYS = {
   KeyW: [0, -1], ArrowUp: [0, -1],
@@ -69,6 +74,7 @@ let studySig = "";
 let muted = false;
 let audioCtx = null;
 let saveAcc = 0;
+let hudAcc = 0;
 let pinchDist = 0;
 let noticeSig = "";
 const heldMove = new Set();
@@ -111,14 +117,20 @@ function setPower(id) {
   syncPossessChrome();
 }
 
+function isTouchUi() {
+  return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches
+    || ("ontouchstart" in window && window.innerWidth < 900);
+}
+
 function syncPossessChrome() {
   const on = !!sim?.possessedId;
   document.body.classList.toggle("possessing", on);
   const pad = $("mobilePad");
   if (pad) {
-    pad.classList.toggle("force", on || window.innerWidth < 768);
-    pad.classList.toggle("hidden", !(on || (window.innerWidth < 768 && document.body.classList.contains("is-mobile"))));
-    pad.setAttribute("aria-hidden", on ? "false" : "true");
+    // D-pad only while possessing on touch / small screens
+    const show = on && isTouchUi();
+    pad.classList.toggle("hidden", !show);
+    pad.setAttribute("aria-hidden", show ? "false" : "true");
   }
 }
 
@@ -228,7 +240,7 @@ function onMapClick(e) {
     return;
   }
   const world = renderer.screenToWorld(e.clientX, e.clientY);
-  const villager = sim.pickVillager(world.x, world.y);
+  const villager = sim.pickVillager(world.x, world.y, isTouchUi() ? 28 : 18);
 
   if (villager?.dilemma) {
     openChoice(villager.name, villager.dilemma.text, [
@@ -270,13 +282,15 @@ function onMapClick(e) {
     sim.selectedId = villager.id;
     return;
   }
-  if (power === "bless") sim.castBless(villager);
+  if (power === "bless") sim.castBless(villager || null);
   else if (power === "inspire") sim.castInspire(villager);
   else if (power === "food") sim.castFood(world.x, world.y);
   else if (power === "lightning") sim.castLightning(world.x, world.y);
   else if (power === "hurricane") sim.castHurricane(world.x, world.y);
   else if (power === "wildfire") sim.castWildfire(world.x, world.y);
   else if (power === "hut") sim.castHut(world.x, world.y);
+  else if (power === "rain") sim.castRain(world.x, world.y);
+  else if (power === "quake") sim.castQuake(world.x, world.y);
   if (villager && PERSON.has(power)) sim.selectedId = villager.id;
 }
 
@@ -287,6 +301,10 @@ function bindInput() {
   let ly = 0;
   const pointers = new Map();
 
+  let carryId = null;
+  let holdTimer = null;
+  let holdCandidate = null;
+
   canvas.addEventListener("pointerdown", (e) => {
     if (e.button === 2) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -295,6 +313,8 @@ function bindInput() {
       pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
       dragging = false;
       brushPainting = false;
+      clearTimeout(holdTimer);
+      holdTimer = null;
       return;
     }
     const world = renderer.screenToWorld(e.clientX, e.clientY);
@@ -308,6 +328,18 @@ function bindInput() {
     moved = 0;
     lx = e.clientX;
     ly = e.clientY;
+    holdCandidate = sim.pickVillager(world.x, world.y, isTouchUi() ? 28 : 18);
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      if (holdCandidate && moved < 10 && sim.activePower === "inspect" && !sim.brushMode && !sim.placementBuild) {
+        carryId = holdCandidate.id;
+        holdCandidate.carried = true;
+        holdCandidate.job = null;
+        holdCandidate.path = null;
+        sim.selectedId = holdCandidate.id;
+        showToast(`Holding ${holdCandidate.name}`);
+      }
+    }, 280);
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
     document.body.classList.add("dragging");
   });
@@ -331,8 +363,17 @@ function bindInput() {
     }
     const world = renderer.screenToWorld(e.clientX, e.clientY);
     sim.cursor = world;
-    const hover = sim.pickVillager(world.x, world.y);
+    const hover = sim.pickVillager(world.x, world.y, isTouchUi() ? 28 : 18);
     sim.hoveredId = hover ? hover.id : null;
+    if (carryId) {
+      const v = sim.villagerById(carryId);
+      if (v) {
+        v.x = world.x;
+        v.y = world.y + Math.sin(animTime * 10) * 2;
+        v.carried = true;
+      }
+      return;
+    }
     if (brushPainting && sim.brushMode) {
       sim.paintBrush(world.x, world.y, sim.brushMode);
       return;
@@ -341,8 +382,15 @@ function bindInput() {
     const dx = e.clientX - lx;
     const dy = e.clientY - ly;
     moved += Math.abs(dx) + Math.abs(dy);
-    renderer.cam.x -= dx / renderer.cam.zoom;
-    renderer.cam.y -= dy / renderer.cam.zoom;
+    if (moved > 10) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / Math.max(1, rect.width);
+    const sy = canvas.height / Math.max(1, rect.height);
+    renderer.cam.x -= (dx * sx) / renderer.cam.zoom;
+    renderer.cam.y -= (dy * sy) / renderer.cam.zoom;
     lx = e.clientX;
     ly = e.clientY;
   });
@@ -350,6 +398,26 @@ function bindInput() {
   const endPtr = (e) => {
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinchDist = 0;
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    if (carryId) {
+      const v = sim.villagerById(carryId);
+      const world = renderer.screenToWorld(e.clientX, e.clientY);
+      if (v) {
+        const tile = sim.worldToTile(world.x, world.y);
+        const spot = sim.nearestWalkable(tile.tx, tile.ty, 4) || tile;
+        const c = sim.tileCenter(spot.tx, spot.ty);
+        v.x = c.x;
+        v.y = c.y;
+        v.carried = false;
+        v.job = null;
+        showToast(`Dropped ${v.name}`);
+      }
+      carryId = null;
+      dragging = false;
+      document.body.classList.remove("dragging");
+      return;
+    }
     if (brushPainting) {
       brushPainting = false;
       return;
@@ -443,6 +511,25 @@ function bindInput() {
     });
   });
 
+  $("restBtn")?.addEventListener("click", () => {
+    sim.forceRest(sim.selectedId);
+  });
+  let spectator = true;
+  $("spectateBtn")?.addEventListener("click", () => {
+    spectator = !spectator;
+    $("spectateBtn").classList.toggle("on", spectator);
+    document.body.classList.toggle("spectating", spectator);
+    if (spectator) {
+      sim.activePower = "inspect";
+      document.querySelectorAll("#powers button[data-power]").forEach((b) => b.classList.toggle("on", b.dataset.power === "inspect"));
+      showToast("Spectating — civilization runs itself");
+      $("powerHint").textContent = "Watch the world. Pick a power only when you want to intervene.";
+    } else {
+      showToast("Intervention mode — your hand is free");
+      $("powerHint").textContent = HINTS[sim.activePower] || "";
+    }
+  });
+  document.body.classList.add("spectating");
   $("pauseBtn").addEventListener("click", togglePause);
   $("muteBtn").addEventListener("click", () => {
     muted = !muted;
@@ -494,6 +581,10 @@ function bindInput() {
   });
   $("cloudSaveBtn").addEventListener("click", () => cloudSave());
   $("cloudLoadBtn").addEventListener("click", () => cloudLoad());
+  $("tutorialOk")?.addEventListener("click", () => {
+    localStorage.setItem(TUTORIAL_KEY, "1");
+    $("tutorial").classList.add("hidden");
+  });
 
   window.addEventListener("keydown", (e) => {
     if (MOVE_KEYS[e.code] && sim.possessedId) {
@@ -534,12 +625,39 @@ function bindInput() {
   });
   window.addEventListener("beforeunload", () => saveLocal());
 
+  $("hudToggle")?.addEventListener("click", () => {
+    document.body.classList.toggle("hud-compact");
+    $("hudToggle")?.classList.toggle("on", document.body.classList.contains("hud-compact"));
+    showToast(document.body.classList.contains("hud-compact") ? "Map focus" : "HUD shown");
+  });
+  $("logToggle")?.addEventListener("click", () => {
+    document.body.classList.toggle("show-log");
+    $("logToggle")?.classList.toggle("on", document.body.classList.contains("show-log"));
+    if (document.body.classList.contains("show-log")) {
+      $("inspector")?.classList.add("hidden");
+    }
+  });
+
   syncMobileChrome();
   window.matchMedia("(max-width: 768px)").addEventListener?.("change", syncMobileChrome);
+  window.matchMedia("(pointer: coarse)").addEventListener?.("change", syncMobileChrome);
+  window.addEventListener("orientationchange", () => {
+    setTimeout(() => {
+      syncMobileChrome();
+      renderer.resize();
+    }, 120);
+  });
 }
 
 function syncMobileChrome() {
-  document.body.classList.toggle("is-mobile", window.innerWidth < 768);
+  const mobile = isTouchUi();
+  document.body.classList.toggle("is-mobile", mobile);
+  if (!mobile) {
+    document.body.classList.remove("hud-compact", "show-log");
+    $("hudToggle")?.classList.remove("on");
+    $("logToggle")?.classList.remove("on");
+  }
+  syncPossessChrome();
 }
 
 function togglePause() {
@@ -668,8 +786,12 @@ function updateHud() {
   $("eraName").textContent = sim.eraName;
   $("eraPip").className = `era-pip ${sim.era}`;
   const study = sim.getStudyList()[0];
-  const tribeNote = sim.tribes.length > 1 ? ` · ${sim.tribes.length} tribes` : "";
-  $("eraSub").textContent = `${study ? `Seeking ${study.name}` : "The old arts are known"}${tribeNote}`;
+  const nations = sim.tribes.filter((t) => t.isNation);
+  const wars = (sim.wars || []).filter((w) => !w.done);
+  let tribeNote = sim.tribes.length > 1 ? ` · ${sim.tribes.length} peoples` : "";
+  if (nations.length) tribeNote += ` · ${nations.length} nation${nations.length > 1 ? "s" : ""}`;
+  if (wars.length) tribeNote += ` · ⚔ ${wars.length} war${wars.length > 1 ? "s" : ""}`;
+  $("eraSub").textContent = `${study ? `Seeking ${study.name}` : "History writes itself"}${tribeNote}`;
   $("pop").textContent = String(pop.total);
   $("popBreak").textContent = `${pop.adults} adults · ${pop.children} children`;
   const morale = Math.round(sim.morale);
@@ -677,7 +799,9 @@ function updateHud() {
   $("moraleVal").textContent = String(morale);
   $("when").textContent = `${["❀", "☀", "❧", "❄"][sim.seasonIndex]} ${sim.seasonName}`;
   const day = (Math.floor(sim.time / sim.dayLength) % sim.daysPerSeason) + 1;
-  $("whenSub").textContent = `Year ${sim.year} · Day ${day}`;
+  const moon = Math.round((sim.moonPhase || 0) * 8) % 8;
+  const moonGlyph = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"][moon];
+  $("whenSub").textContent = `Year ${sim.year} · Day ${day} · ${moonGlyph} · ${Math.round(sim.ambientTemp)}°`;
   if (sim.religion) {
     $("faithName").textContent = sim.religion.name;
     $("faithSub").textContent = sim.religion.deity === "player" ? "Turned toward you" : "Turned toward the wild";
@@ -688,6 +812,8 @@ function updateHud() {
   $("resFood").textContent = String(Math.floor(stock.food));
   $("resWood").textContent = String(Math.floor(stock.wood));
   $("resStone").textContent = String(Math.floor(stock.stone));
+  if ($("resGold")) $("resGold").textContent = String(Math.floor(stock.gold || 0));
+  if ($("resGas")) $("resGas").textContent = String(Math.floor(stock.gas || 0));
 
   document.querySelectorAll("#powers button[data-power]").forEach((btn) => {
     const id = btn.dataset.power;
@@ -706,9 +832,15 @@ function updateHud() {
   }
 
   const studies = sim.getStudyList();
-  const ssig = studies.map((s) => `${s.id}:${Math.floor(s.pct)}`).join(",");
+  const goals = sim.getGoals?.() || [];
+  const ssig = studies.map((s) => `${s.id}:${Math.floor(s.pct)}`).join(",") + "|" + goals.map((g) => g.id + g.done).join(",");
   if (ssig !== studySig) {
     studySig = ssig;
+    if ($("goals")) {
+      $("goals").innerHTML = goals.map((g) =>
+        `<li class="${g.done ? "done" : ""}"><span class="gmeta">${g.done ? "Done" : "Open"}</span>${escapeHtml(g.label)}</li>`
+      ).join("");
+    }
     $("studies").innerHTML = studies.length
       ? studies.map((s) => `
         <div class="study">
@@ -730,19 +862,28 @@ function updateHud() {
     if (sim.selectedId) sim.selectedId = null;
     $("inspector").classList.add("hidden");
   } else {
+    document.body.classList.remove("show-log");
+    $("logToggle")?.classList.remove("on");
     $("inspector").classList.remove("hidden");
     const tribe = sim.tribeOf(selected.tribeId);
-    $("vName").textContent = selected.name;
-    $("vMeta").textContent = `${selected.isChild ? "Child" : `Age ${selected.age}`} · IQ ${Math.round(selected.intelligence)} · ${selected.moodLabel()}`;
-    $("vTribe").textContent = `${tribe ? tribe.name : "Wanderer"}${selected.partnerId ? " · paired" : ""}${selected.illness ? ` · ${selected.illness.type}` : ""}`;
+    const isLeader = tribe && tribe.leaderId === selected.id;
+    const title = isLeader ? (tribe.govTitle || "Elder") : null;
+    $("vName").textContent = selected.displayName || selected.name;
+    $("vMeta").textContent = `${selected.lifeStageLabel || (selected.isChild ? "Child" : `Age ${selected.age}`)} ${selected.age}y · IQ ${Math.round(selected.intelligence)} · ${selected.moodLabel()}${title ? ` · ${title}` : ""}`;
+    const nation = tribe?.isNation ? (tribe.nationName || tribe.name) : (tribe ? tribe.name : "Wanderer");
+    $("vTribe").textContent = `${nation}${selected.partnerId ? " · paired" : ""}${selected.illness ? ` · ${selected.illness.type}` : ""}${selected.expecting > 0 ? " · expecting" : ""} · ${selected.topSkill?.() || "living"}${selected.personalGold > 0.5 ? ` · ✦${selected.personalGold.toFixed(1)}` : ""}`;
     $("vLineage").textContent = selected.isFounder
-      ? `Founder · line ${selected.founderLineName || selected.name}`
-      : `Gen ${selected.generation || 0} · blood of ${selected.founderLineName || "unknown"}`;
+      ? `Founder · house ${selected.surname || selected.founderLineName || selected.name}`
+      : `Gen ${selected.generation || 0} · house ${selected.surname || selected.founderLineName || "unknown"}`;
     $("vTrait").textContent = `${selected.trait}${(selected.traitTags || []).length ? " · " + selected.traitTags.join(", ") : ""}`;
     bar("mHunger", selected.hunger);
     bar("mEnergy", selected.energy);
     bar("mHealth", selected.health);
     bar("mBelief", selected.religionBelief);
+    bar("mNeedHunger", selected.needHunger);
+    bar("mNeedRest", selected.needRest);
+    bar("mNeedSocial", selected.needSocial);
+    bar("mNeedSafety", selected.needSafety);
     scoreBar("mEmp", selected.empathyScore || 0);
     scoreBar("mBold", selected.boldnessScore || 0);
     scoreBar("mPeace", selected.peacefulnessScore || 0);
@@ -751,17 +892,56 @@ function updateHud() {
     $("nEnergy").textContent = String(Math.round(selected.energy));
     $("nHealth").textContent = String(Math.round(selected.health));
     $("nBelief").textContent = String(Math.round(selected.religionBelief));
+    $("nNeedHunger").textContent = String(Math.round(selected.needHunger));
+    $("nNeedRest").textContent = String(Math.round(selected.needRest));
+    $("nNeedSocial").textContent = String(Math.round(selected.needSocial));
+    $("nNeedSafety").textContent = String(Math.round(selected.needSafety));
     $("nEmp").textContent = String(Math.round(selected.empathyScore || 0));
     $("nBold").textContent = String(Math.round(selected.boldnessScore || 0));
     $("nPeace").textContent = String(Math.round(selected.peacefulnessScore || 0));
     $("nGodA").textContent = String(Math.round(selected.godAlignmentScore || 0));
     $("vMood").textContent = selected.moodLabel();
-    $("vTask").textContent = selected.taskLabel || "Idle";
+    if ($("vThought")) {
+      $("vThought").textContent = selected.thought
+        ? `Thinking: “${selected.thought}”`
+        : selected.speechT > 0 ? `Saying: “${selected.speech}”` : "Mind quiet";
+    }
+    if ($("vWant")) {
+      $("vWant").textContent = selected.want
+        ? `Wants: ${selected.want.label || selected.want.id}`
+        : "Choosing freely…";
+    }
+    $("vTask").textContent = selected.taskLabel || "Living";
     $("vUrge").textContent = selected.urge ? `Studies ${selected.urge}` : `Insights ${Math.floor(selected.insightTotal || 0)}`;
+    if ($("vBreakdown")) {
+      const bits = [];
+      if (selected.breakdown) bits.push(`Breakdown: ${selected.breakdown.type}`);
+      if (selected.prayerBuffT > 0) bits.push("Prayer-warmed");
+      if (selected.sleepDebt > 40) bits.push(`Sleep debt ${Math.round(selected.sleepDebt)}`);
+      if (selected.bodyTemp != null) bits.push(`${selected.bodyTemp.toFixed(1)}°C`);
+      if (selected.loneliness > 40) bits.push("Lonely");
+      if (selected.routineHint) bits.push(selected.routineHint);
+      bits.push(`${Math.round(sim.ambientTemp)}° air`);
+      $("vBreakdown").textContent = bits.join(" · ");
+    }
+    const tree = selected.familyTree?.(sim) || { parents: [], spouse: null, children: [] };
+    if ($("vFamily")) {
+      const bits = [];
+      if (tree.parents.length) bits.push(`Parents: ${tree.parents.join(", ")}`);
+      if (tree.spouse) bits.push(`Spouse: ${tree.spouse}`);
+      if (tree.children.length) bits.push(`Children: ${tree.children.join(", ")}`);
+      if (!bits.length) bits.push("No living family recorded");
+      $("vFamily").textContent = bits.join(" · ");
+    }
     const genes = [];
     if (selected.geneticHealth != null) genes.push(`Vitality ${Math.round(selected.geneticHealth)}`);
     if (selected.inbreedingCoefficient) genes.push(`Inbreed ${(selected.inbreedingCoefficient * 100) | 0}%`);
     if (selected.hereditaryTraits?.length) genes.push(selected.hereditaryTraits.join(", "));
+    if (selected.skills) {
+      const sk = Object.entries(selected.skills).sort((a, b) => b[1] - a[1]).slice(0, 3)
+        .map(([k, v]) => `${k} ${Math.round(v)}`);
+      if (sk.length) genes.push(`Skills: ${sk.join(", ")}`);
+    }
     $("vGenes").textContent = genes.join(" · ");
     if ($("vBody") && selected.body) {
       const parts = Object.entries(selected.body).map(([k, v]) => {
@@ -837,7 +1017,13 @@ function frame(now) {
     saveLocal();
   }
   renderer.draw(sim, animTime);
-  updateHud();
+  hudAcc = (hudAcc || 0) + raw;
+  // Full HUD ~8/s; inspector (selected) refreshes a bit faster
+  const hudNeed = sim.selectedId ? 0.08 : 0.14;
+  if (hudAcc >= hudNeed || sim.over || (sim.toast && sim.toast.life > 0)) {
+    hudAcc = 0;
+    updateHud();
+  }
   playSfx();
   requestAnimationFrame(frame);
 }
@@ -845,4 +1031,6 @@ function frame(now) {
 if (loadLocal()) showToast("Restored local save.");
 else boot();
 bindInput();
+if (!localStorage.getItem(TUTORIAL_KEY)) $("tutorial")?.classList.remove("hidden");
+else $("tutorial")?.classList.add("hidden");
 requestAnimationFrame(frame);
