@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#100e0c" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Emberkin</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%2314100e' width='32' height='32' rx='6'/%3E%3Cpath fill='%23e7a04a' d='M16 4c2 5-2 7-1 11 3-2 6 1 6 5a7 7 0 1 1-14 0c0-3 2-5 4-7-1 3 2 4 2 4-.4-4 1-9 3-13z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="game" aria-label="Emberkin colony"></canvas>
+  <div id="vignette"></div>
+
+  <div id="ui">
+    <header class="topbar">
+      <div class="brand">
+        <span class="era-pip" id="eraPip"></span>
+        <div>
+          <div class="wordmark">Emberkin</div>
+          <div class="era-name" id="eraName">Stone Age</div>
+          <div class="era-sub" id="eraSub">First light</div>
+        </div>
+      </div>
+
+      <div class="stat">
+        <span class="k">People</span>
+        <span class="v" id="pop">0</span>
+        <span class="subv" id="popBreak">—</span>
+      </div>
+
+      <div class="stat stat-wide">
+        <span class="k">Morale</span>
+        <div class="track"><div id="moraleBar" class="fill good"></div></div>
+        <span class="v" id="moraleVal">0</span>
+      </div>
+
+      <div class="stat">
+        <span class="k">When</span>
+        <span class="v" id="when">Spring</span>
+        <span class="subv" id="whenSub">Year 1</span>
+      </div>
+
+      <div class="stat">
+        <span class="k">Faith</span>
+        <span class="v" id="faithName">Unnamed</span>
+        <span class="subv" id="faithSub">No rite yet</span>
+      </div>
+
+      <div class="stocks" id="stocks">
+        <span title="Food">🍞 <b id="resFood">0</b></span>
+        <span title="Wood">🪵 <b id="resWood">0</b></span>
+        <span title="Stone">🪨 <b id="resStone">0</b></span>
+      </div>
+
+      <div class="time-controls">
+        <button type="button" id="saveBtn" title="Save">Save</button>
+        <button type="button" id="pauseBtn" title="Space">Pause</button>
+        <button type="button" class="on" data-speed="1">1×</button>
+        <button type="button" data-speed="2">2×</button>
+        <button type="button" data-speed="3">3×</button>
+        <button type="button" id="muteBtn" title="Sound">♪</button>
+      </div>
+    </header>
+
+    <aside id="chronicle">
+      <h2>Chronicle</h2>
+      <ol id="log"></ol>
+      <h2>Studies</h2>
+      <div id="studies"></div>
+      <p class="hintkeys">Drag to pan · Pinch/scroll zoom · 1–9 powers · Space pause</p>
+    </aside>
+
+    <aside id="inspector" class="hidden">
+      <button type="button" id="closeInspector" aria-label="Close">×</button>
+      <div class="who">
+        <canvas id="portrait" width="96" height="96"></canvas>
+        <div>
+          <h2 id="vName">—</h2>
+          <div id="vMeta" class="meta"></div>
+          <div id="vTribe" class="meta"></div>
+          <div id="vLineage" class="meta"></div>
+        </div>
+      </div>
+      <div id="vTrait" class="trait-pill">—</div>
+      <div class="meter"><span>Hunger</span><div class="track"><div id="mHunger" class="fill bad"></div></div><em id="nHunger"></em></div>
+      <div class="meter"><span>Energy</span><div class="track"><div id="mEnergy" class="fill good"></div></div><em id="nEnergy"></em></div>
+      <div class="meter"><span>Health</span><div class="track"><div id="mHealth" class="fill good"></div></div><em id="nHealth"></em></div>
+      <div class="meter"><span>Belief</span><div class="track"><div id="mBelief" class="fill faith"></div></div><em id="nBelief"></em></div>
+      <h3>Spirit</h3>
+      <div class="meter"><span>Empathy</span><div class="track"><div id="mEmp" class="fill faith"></div></div><em id="nEmp"></em></div>
+      <div class="meter"><span>Bold</span><div class="track"><div id="mBold" class="fill study"></div></div><em id="nBold"></em></div>
+      <div class="meter"><span>Peace</span><div class="track"><div id="mPeace" class="fill good"></div></div><em id="nPeace"></em></div>
+      <div class="meter"><span>Faith≈</span><div class="track"><div id="mGodA" class="fill faith"></div></div><em id="nGodA"></em></div>
+      <p id="vMood" class="mood"></p>
+      <p id="vTask" class="task"></p>
+      <p id="vUrge" class="urge"></p>
+      <p id="vGenes" class="meta"></p>
+      <blockquote id="vMemory"></blockquote>
+      <ul id="vMemList" class="memlist"></ul>
+      <h3>Influence</h3>
+      <ul id="vInfluence" class="memlist"></ul>
+      <h3>Bonds</h3>
+      <ul id="vRels" class="rels"></ul>
+      <p id="vStores" class="stores"></p>
+    </aside>
+
+    <div id="mobilePad" class="hidden" aria-hidden="true">
+      <button type="button" data-dir="up">▲</button>
+      <div class="mid">
+        <button type="button" data-dir="left">◀</button>
+        <button type="button" data-dir="down">▼</button>
+        <button type="button" data-dir="right">▶</button>
+      </div>
+    </div>
+
+    <footer id="powers">
+      <div id="powerHint">Click a villager to look into their life.</div>
+      <div id="noticeBar" class="hidden"></div>
+      <div class="power-row">
+        <button type="button" data-power="inspect" class="on" title="1"><span class="ico">👁</span><span class="lbl">Watch</span><i class="cd"></i><kbd>1</kbd></button>
+        <button type="button" data-power="bless" title="2"><span class="ico">✦</span><span class="lbl">Bless</span><i class="cd"></i><kbd>2</kbd></button>
+        <button type="button" data-power="inspire" title="3"><span class="ico">💡</span><span class="lbl">Inspire</span><i class="cd"></i><kbd>3</kbd></button>
+        <button type="button" data-power="whisper" title="9"><span class="ico">🕊</span><span class="lbl">Whisper</span><i class="cd"></i><kbd>9</kbd></button>
+        <button type="button" data-power="food" title="4"><span class="ico">🍞</span><span class="lbl">Manna</span><i class="cd"></i><kbd>4</kbd></button>
+        <button type="button" data-power="lightning" title="5"><span class="ico">⚡</span><span class="lbl">Bolt</span><i class="cd"></i><kbd>5</kbd></button>
+        <button type="button" data-power="hurricane" title="6"><span class="ico">🌀</span><span class="lbl">Storm</span><i class="cd"></i><kbd>6</kbd></button>
+        <button type="button" data-power="wildfire" title="7"><span class="ico">🔥</span><span class="lbl">Fire</span><i class="cd"></i><kbd>7</kbd></button>
+        <button type="button" data-power="hut" title="8"><span class="ico">⌂</span><span class="lbl">Hut</span><i class="cd"></i><kbd>8</kbd></button>
+      </div>
+    </footer>
+
+    <div id="toast" class="hidden"></div>
+
+    <div id="choiceOverlay" class="hidden">
+      <div class="card">
+        <p class="eyebrow" id="choiceEyebrow">Choice</p>
+        <h2 id="choiceTitle">—</h2>
+        <p id="choiceText"></p>
+        <div id="choiceButtons" class="choice-btns"></div>
+      </div>
+    </div>
+
+    <div id="saveOverlay" class="hidden">
+      <div class="card save-card">
+        <p class="eyebrow">Continuity</p>
+        <h2>Save / Load</h2>
+        <div class="choice-btns">
+          <button type="button" id="saveNowBtn">Save now</button>
+          <button type="button" id="loadLocalBtn">Load local</button>
+          <button type="button" id="newGameBtn">New game</button>
+        </div>
+        <label class="save-label">Export / import code</label>
+        <textarea id="saveCode" rows="3" placeholder="Save code appears here…"></textarea>
+        <div class="choice-btns">
+          <button type="button" id="exportBtn">Export</button>
+          <button type="button" id="importBtn">Import</button>
+        </div>
+        <label class="save-label">JSONBin cloud (API key stays on this device only)</label>
+        <input id="cloudKey" type="password" placeholder="JSONBin X-Master-Key" autocomplete="off" />
+        <input id="cloudRoom" type="text" placeholder="Cloud Room ID (bin id)" />
+        <div class="choice-btns">
+          <button type="button" id="cloudSaveBtn">Save to cloud</button>
+          <button type="button" id="cloudLoadBtn">Load from cloud</button>
+        </div>
+        <p class="meta">Create a free key at jsonbin.io. Never share your master key.</p>
+        <button type="button" id="closeSaveBtn">Close</button>
+      </div>
+    </div>
+
+    <div id="overlay" class="hidden">
+      <div class="card">
+        <p class="eyebrow">The land</p>
+        <h2 id="overlayTitle">Silence</h2>
+        <p id="overlayText"></p>
+        <button type="button" id="restartBtn">Kindle a new people</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
