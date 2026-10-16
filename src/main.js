@@ -118,12 +118,16 @@ function setPower(id) {
   $("powerHint").textContent = HINTS[id] || "";
   document.body.classList.toggle("mode-ground", GROUND.has(id));
   document.body.classList.toggle("mode-person", PERSON.has(id));
+  // On phone, collapse the power tray after a pick so the map stays open
+  if (isTouchUi() && document.body.classList.contains("hud-compact")) {
+    document.body.classList.remove("powers-open");
+  }
   syncPossessChrome();
 }
 
 function isTouchUi() {
-  return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches
-    || ("ontouchstart" in window && window.innerWidth < 900);
+  return window.matchMedia("(max-width: 900px), (pointer: coarse)").matches
+    || ("ontouchstart" in window && Math.min(window.innerWidth, window.innerHeight) < 900);
 }
 
 function syncPossessChrome() {
@@ -542,6 +546,7 @@ function bindInput() {
   $("closeInspector").addEventListener("click", () => {
     sim.selectedId = null;
     $("inspector").classList.add("hidden");
+    document.body.classList.remove("inspect-deep");
   });
   $("restartBtn").addEventListener("click", () => {
     clearLocalSave();
@@ -631,19 +636,69 @@ function bindInput() {
 
   $("hudToggle")?.addEventListener("click", () => {
     document.body.classList.toggle("hud-compact");
-    $("hudToggle")?.classList.toggle("on", document.body.classList.contains("hud-compact"));
-    showToast(document.body.classList.contains("hud-compact") ? "Map focus" : "HUD shown");
+    const on = document.body.classList.contains("hud-compact");
+    $("hudToggle")?.classList.toggle("on", on);
+    if (on) {
+      document.body.classList.remove("show-tools", "powers-open", "show-log");
+      $("toolsToggle")?.classList.remove("on");
+      $("logToggle")?.classList.remove("on");
+    }
+    showToast(on ? "Map focus" : "HUD shown");
   });
   $("logToggle")?.addEventListener("click", () => {
     document.body.classList.toggle("show-log");
-    $("logToggle")?.classList.toggle("on", document.body.classList.contains("show-log"));
-    if (document.body.classList.contains("show-log")) {
+    const on = document.body.classList.contains("show-log");
+    $("logToggle")?.classList.toggle("on", on);
+    if (on) {
       $("inspector")?.classList.add("hidden");
+      document.body.classList.remove("show-tools");
+      $("toolsToggle")?.classList.remove("on");
     }
+  });
+  $("toolsToggle")?.addEventListener("click", () => {
+    document.body.classList.toggle("show-tools");
+    const on = document.body.classList.contains("show-tools");
+    $("toolsToggle")?.classList.toggle("on", on);
+    if (on) {
+      document.body.classList.remove("hud-compact", "show-log");
+      $("hudToggle")?.classList.remove("on");
+      $("logToggle")?.classList.remove("on");
+    }
+  });
+  $("powersPeek")?.addEventListener("click", () => {
+    document.body.classList.toggle("powers-open");
+    $("powersPeek").textContent = document.body.classList.contains("powers-open") ? "⌃ Powers" : "⌃ Powers";
+  });
+  const openMore = (open) => {
+    $("moreSheet")?.classList.toggle("hidden", !open);
+    $("moreSheet")?.setAttribute("aria-hidden", open ? "false" : "true");
+    $("moreToggle")?.classList.toggle("on", open);
+  };
+  $("moreToggle")?.addEventListener("click", () => openMore($("moreSheet")?.classList.contains("hidden")));
+  $("moreClose")?.addEventListener("click", () => openMore(false));
+  $("moreSheet")?.addEventListener("click", (e) => {
+    if (e.target === $("moreSheet")) openMore(false);
+  });
+  $("moreSpectate")?.addEventListener("click", () => {
+    $("spectateBtn")?.click();
+    openMore(false);
+  });
+  $("moreSave")?.addEventListener("click", () => {
+    openMore(false);
+    $("saveBtn")?.click();
+  });
+  $("moreRest")?.addEventListener("click", () => {
+    $("restBtn")?.click();
+    openMore(false);
+  });
+  // Tap portrait area to expand full villager sheet on phone
+  $("portrait")?.addEventListener("click", () => {
+    if (!isTouchUi()) return;
+    document.body.classList.toggle("inspect-deep");
   });
 
   syncMobileChrome();
-  window.matchMedia("(max-width: 768px)").addEventListener?.("change", syncMobileChrome);
+  window.matchMedia("(max-width: 900px)").addEventListener?.("change", syncMobileChrome);
   window.matchMedia("(pointer: coarse)").addEventListener?.("change", syncMobileChrome);
   window.addEventListener("orientationchange", () => {
     setTimeout(() => {
@@ -656,10 +711,21 @@ function bindInput() {
 function syncMobileChrome() {
   const mobile = isTouchUi();
   document.body.classList.toggle("is-mobile", mobile);
-  if (!mobile) {
-    document.body.classList.remove("hud-compact", "show-log");
+  if (mobile) {
+    // Default: map-first chrome on phones (S23 Ultra etc.)
+    if (!document.body.dataset.hudInit) {
+      document.body.dataset.hudInit = "1";
+      document.body.classList.add("hud-compact");
+      $("hudToggle")?.classList.add("on");
+    }
+  } else {
+    document.body.classList.remove("hud-compact", "show-log", "show-tools", "powers-open", "inspect-deep");
+    delete document.body.dataset.hudInit;
     $("hudToggle")?.classList.remove("on");
     $("logToggle")?.classList.remove("on");
+    $("toolsToggle")?.classList.remove("on");
+    $("moreToggle")?.classList.remove("on");
+    $("moreSheet")?.classList.add("hidden");
   }
   syncPossessChrome();
 }
@@ -882,6 +948,7 @@ function updateHud() {
     document.body.classList.remove("show-log");
     $("logToggle")?.classList.remove("on");
     $("inspector").classList.remove("hidden");
+    if (!selected) document.body.classList.remove("inspect-deep");
     const tribe = sim.tribeOf(selected.tribeId);
     const isLeader = tribe && tribe.leaderId === selected.id;
     const title = isLeader ? (tribe.govTitle || "Elder") : null;
