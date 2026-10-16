@@ -30,7 +30,11 @@ Watch · **Possess (0)** · Bless · Inspire · **Whisper** · Manna · Lightnin
 
 **Whisper** opens a menu (innovation, pardon, love, explore, rain). Devout minds usually obey; rebellious ones may defy.
 
-**Build / Land bars:** place campfire, hut, storage, research blueprints; divine brushes raise land, dig water, plant trees, spawn wildlife.
+**Rain (8)** cools fires and feeds farms. **Quake (Q)** cracks the land and shakes buildings.
+
+**Build / Land bars:** campfire, hut, storage, research, well; brushes raise land, dig water, plant trees, spawn wildlife.
+
+**Goals** in the chronicle (population, Bronze Age, religion, festival, Year 5). Festivals start when morale and food are high.
 
 Tap a **❓** above a villager during a dilemma to guide them.
 

@@ -5,8 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#100e0c" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <title>Emberkin</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%2314100e' width='32' height='32' rx='6'/%3E%3Cpath fill='%23e7a04a' d='M16 4c2 5-2 7-1 11 3-2 6 1 6 5a7 7 0 1 1-14 0c0-3 2-5 4-7-1 3 2 4 2 4-.4-4 1-9 3-13z'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Sora:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -24,25 +29,25 @@
         </div>
       </div>
 
-      <div class="stat">
+      <div class="stat stat-pop">
         <span class="k">People</span>
         <span class="v" id="pop">0</span>
         <span class="subv" id="popBreak">—</span>
       </div>
 
-      <div class="stat stat-wide">
+      <div class="stat stat-wide stat-morale">
         <span class="k">Morale</span>
         <div class="track"><div id="moraleBar" class="fill good"></div></div>
         <span class="v" id="moraleVal">0</span>
       </div>
 
-      <div class="stat">
+      <div class="stat stat-when">
         <span class="k">When</span>
         <span class="v" id="when">Spring</span>
         <span class="subv" id="whenSub">Year 1</span>
       </div>
 
-      <div class="stat">
+      <div class="stat stat-faith">
         <span class="k">Faith</span>
         <span class="v" id="faithName">Unnamed</span>
         <span class="subv" id="faithSub">No rite yet</span>
@@ -52,11 +57,17 @@
         <span title="Food">🍞 <b id="resFood">0</b></span>
         <span title="Wood">🪵 <b id="resWood">0</b></span>
         <span title="Stone">🪨 <b id="resStone">0</b></span>
+        <span title="Gold">✦ <b id="resGold">0</b></span>
+        <span title="Gas">☁ <b id="resGas">0</b></span>
       </div>
 
       <div class="time-controls">
+        <button type="button" id="hudToggle" class="mobile-only" title="Toggle panels">☰</button>
+        <button type="button" id="logToggle" class="mobile-only" title="Chronicle">📜</button>
+        <button type="button" id="spectateBtn" class="on" title="Civilization runs itself — tap powers only when you want to intervene"><span class="btn-full">Spectate</span><span class="btn-short">Auto</span></button>
         <button type="button" id="saveBtn" title="Save">Save</button>
-        <button type="button" id="pauseBtn" title="Space">Pause</button>
+        <button type="button" id="restBtn" title="Send selected (or weary) villagers to sleep">Rest</button>
+        <button type="button" id="pauseBtn" title="Space"><span class="btn-full">Pause</span><span class="btn-short">❚❚</span></button>
         <button type="button" class="on" data-speed="1">1×</button>
         <button type="button" data-speed="2">2×</button>
         <button type="button" data-speed="3">3×</button>
@@ -67,9 +78,11 @@
     <aside id="chronicle">
       <h2>Chronicle</h2>
       <ol id="log"></ol>
+      <h2>Goals</h2>
+      <ul id="goals" class="goals"></ul>
       <h2>Studies</h2>
       <div id="studies"></div>
-      <p class="hintkeys">Drag to pan · Pinch/scroll zoom · 1–9 powers · Space pause</p>
+      <p class="hintkeys">Spectate by default · Intervene with powers · Hold to lift · Space pause</p>
     </aside>
 
     <aside id="inspector" class="hidden">
@@ -88,19 +101,29 @@
       <div class="meter"><span>Energy</span><div class="track"><div id="mEnergy" class="fill good"></div></div><em id="nEnergy"></em></div>
       <div class="meter"><span>Health</span><div class="track"><div id="mHealth" class="fill good"></div></div><em id="nHealth"></em></div>
       <div class="meter"><span>Belief</span><div class="track"><div id="mBelief" class="fill faith"></div></div><em id="nBelief"></em></div>
+      <h3>Needs</h3>
+      <div class="meter"><span>Fed</span><div class="track"><div id="mNeedHunger" class="fill good"></div></div><em id="nNeedHunger"></em></div>
+      <div class="meter"><span>Rest</span><div class="track"><div id="mNeedRest" class="fill good"></div></div><em id="nNeedRest"></em></div>
+      <div class="meter"><span>Social</span><div class="track"><div id="mNeedSocial" class="fill faith"></div></div><em id="nNeedSocial"></em></div>
+      <div class="meter"><span>Safety</span><div class="track"><div id="mNeedSafety" class="fill study"></div></div><em id="nNeedSafety"></em></div>
+      <p id="vBreakdown" class="meta"></p>
       <p id="vBody" class="meta"></p>
+      <h3>Family</h3>
+      <p id="vFamily" class="meta"></p>
       <h3>Spirit</h3>
       <div class="meter"><span>Empathy</span><div class="track"><div id="mEmp" class="fill faith"></div></div><em id="nEmp"></em></div>
       <div class="meter"><span>Bold</span><div class="track"><div id="mBold" class="fill study"></div></div><em id="nBold"></em></div>
       <div class="meter"><span>Peace</span><div class="track"><div id="mPeace" class="fill good"></div></div><em id="nPeace"></em></div>
       <div class="meter"><span>Faith≈</span><div class="track"><div id="mGodA" class="fill faith"></div></div><em id="nGodA"></em></div>
       <p id="vMood" class="mood"></p>
+      <p id="vThought" class="urge"></p>
+      <p id="vWant" class="task"></p>
       <p id="vTask" class="task"></p>
       <p id="vUrge" class="urge"></p>
       <p id="vGenes" class="meta"></p>
       <blockquote id="vMemory"></blockquote>
       <ul id="vMemList" class="memlist"></ul>
-      <h3>Influence</h3>
+      <h3>Influence History</h3>
       <ul id="vInfluence" class="memlist"></ul>
       <h3>Bonds</h3>
       <ul id="vRels" class="rels"></ul>
@@ -108,13 +131,13 @@
     </aside>
 
     <div id="mobilePad" class="hidden" aria-hidden="true">
-      <button type="button" data-dir="up">▲</button>
-      <div class="mid">
-        <button type="button" data-dir="left">◀</button>
-        <button type="button" data-dir="down">▼</button>
-        <button type="button" data-dir="right">▶</button>
+      <div class="dpad">
+        <button type="button" data-dir="up" aria-label="Up">▲</button>
+        <button type="button" data-dir="left" aria-label="Left">◀</button>
+        <button type="button" data-dir="down" aria-label="Down">▼</button>
+        <button type="button" data-dir="right" aria-label="Right">▶</button>
       </div>
-      <button type="button" id="mobileAct" class="act">⚔</button>
+      <button type="button" id="mobileAct" class="act" aria-label="Act">⚔ Act</button>
     </div>
 
     <div id="toolBars">
@@ -124,6 +147,7 @@
         <button type="button" data-build="hut" title="Hut · 10 wood">⌂</button>
         <button type="button" data-build="storage" title="Storage · 8 wood · 4 stone">📦</button>
         <button type="button" data-build="research" title="Research table · 6 wood · 2 stone">📜</button>
+        <button type="button" data-build="well" title="Well · 4 wood · 6 stone">🕳</button>
       </div>
       <div id="brushBar" class="tool-bar">
         <span class="tool-label">Land</span>
@@ -147,11 +171,27 @@
         <button type="button" data-power="lightning" title="5"><span class="ico">⚡</span><span class="lbl">Bolt</span><i class="cd"></i><kbd>5</kbd></button>
         <button type="button" data-power="hurricane" title="6"><span class="ico">🌀</span><span class="lbl">Storm</span><i class="cd"></i><kbd>6</kbd></button>
         <button type="button" data-power="wildfire" title="7"><span class="ico">🔥</span><span class="lbl">Fire</span><i class="cd"></i><kbd>7</kbd></button>
-        <button type="button" data-power="hut" title="8"><span class="ico">⌂</span><span class="lbl">Hut</span><i class="cd"></i><kbd>8</kbd></button>
+        <button type="button" data-power="rain" title="8"><span class="ico">🌧</span><span class="lbl">Rain</span><i class="cd"></i><kbd>8</kbd></button>
+        <button type="button" data-power="quake" title="Q"><span class="ico">⛰</span><span class="lbl">Quake</span><i class="cd"></i><kbd>Q</kbd></button>
       </div>
     </footer>
 
     <div id="toast" class="hidden"></div>
+
+    <div id="tutorial" class="hidden">
+      <div class="card tutorial-card">
+        <p class="eyebrow">Welcome</p>
+        <h2>You are the sky</h2>
+        <ol class="tutorial-steps">
+          <li><b>Watch (1)</b> — tap a villager to read their life.</li>
+          <li><b>Possess (0)</b> — walk as them with WASD; Space to work.</li>
+          <li><b>Build / Land</b> — place huts or reshape the map.</li>
+          <li><b>Bless &amp; Manna</b> — keep your people fed and faithful.</li>
+          <li>Reach goals in the chronicle: grow, discover, endure.</li>
+        </ol>
+        <button type="button" id="tutorialOk">Begin</button>
+      </div>
+    </div>
 
     <div id="choiceOverlay" class="hidden">
       <div class="card">
