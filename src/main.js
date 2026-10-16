@@ -82,9 +82,13 @@ let brushPainting = false;
 
 function boot(fromSave = null) {
   sim = fromSave || new Simulation();
+  renderer.terrain = null;
   renderer.terrainRev = -1;
   renderer.miniRev = -1;
-  renderer.focus(sim.homeX, sim.homeY);
+  renderer._miniSnap = null;
+  const hx = Number.isFinite(sim.homeX) && sim.homeX ? sim.homeX : (sim.w * sim.tile) / 2;
+  const hy = Number.isFinite(sim.homeY) && sim.homeY ? sim.homeY : (sim.h * sim.tile) / 2;
+  renderer.focus(hx, hy);
   logSig = "";
   studySig = "";
   relStamp = 0;
@@ -689,9 +693,22 @@ function loadLocal() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
-    boot(Simulation.fromSave(JSON.parse(raw)));
+    const data = JSON.parse(raw);
+    // Reject truncated worlds (common cause of black sky / no land)
+    if (!data || !Array.isArray(data.tiles) || data.tiles.length < 96 * 68) {
+      clearLocalSave();
+      return false;
+    }
+    boot(Simulation.fromSave(data));
+    if (!sim?.tiles?.length || sim.tiles.length < sim.w * sim.h) {
+      clearLocalSave();
+      boot();
+      showToast("Save was broken — new world.");
+      return true;
+    }
     return true;
   } catch (_) {
+    clearLocalSave();
     return false;
   }
 }
@@ -1010,19 +1027,35 @@ function frame(now) {
       renderer.cam.y += (host.y - renderer.cam.y) * Math.min(1, raw * 4);
     } else syncPossessChrome();
   }
-  sim.update(paused ? 0 : raw * speed);
-  saveAcc += raw;
-  if (saveAcc > 60) {
-    saveAcc = 0;
-    saveLocal();
+  try {
+    if (!sim) boot();
+    sim.update(paused ? 0 : raw * speed);
+    saveAcc += raw;
+    if (saveAcc > 60) {
+      saveAcc = 0;
+      saveLocal();
+    }
+    renderer.draw(sim, animTime);
+  } catch (err) {
+    console.error("[Emberkin]", err);
+    if (!frame._recovering) {
+      frame._recovering = true;
+      clearLocalSave();
+      try {
+        boot();
+        showToast("World recovered — started fresh.");
+      } catch (e2) {
+        console.error(e2);
+      }
+      setTimeout(() => { frame._recovering = false; }, 2000);
+    }
   }
-  renderer.draw(sim, animTime);
   hudAcc = (hudAcc || 0) + raw;
   // Full HUD ~8/s; inspector (selected) refreshes a bit faster
-  const hudNeed = sim.selectedId ? 0.08 : 0.14;
-  if (hudAcc >= hudNeed || sim.over || (sim.toast && sim.toast.life > 0)) {
+  const hudNeed = sim?.selectedId ? 0.08 : 0.14;
+  if (sim && (hudAcc >= hudNeed || sim.over || (sim.toast && sim.toast.life > 0))) {
     hudAcc = 0;
-    updateHud();
+    try { updateHud(); } catch (_) {}
   }
   playSfx();
   requestAnimationFrame(frame);

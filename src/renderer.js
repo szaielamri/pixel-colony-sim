@@ -164,7 +164,8 @@ export class Renderer {
     this.pixelScale = coarse
       ? Math.max(2, Math.min(3, Math.round((window.devicePixelRatio || 2) * 0.85) || 2))
       : Math.max(2, Math.min(3, Math.round(window.devicePixelRatio || 2)));
-    this.ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+    // Avoid desynchronized — it blanks the canvas on some GPUs/browsers
+    this.ctx = canvas.getContext("2d", { alpha: false }) || canvas.getContext("2d");
     this.cam = { x: 0, y: 0, zoom: coarse ? 2.1 : 2.6 };
     this.terrain = null;
     this.terrainRev = -1;
@@ -258,13 +259,20 @@ export class Renderer {
     this.frame++;
     this.resize();
     const ctx = this.ctx;
+    if (!ctx || !sim) return;
+    // Recover camera if focus was lost (NaN / missing home)
+    if (!Number.isFinite(this.cam.x) || !Number.isFinite(this.cam.y)) {
+      this.cam.x = Number.isFinite(sim.homeX) ? sim.homeX : (sim.w * sim.tile) / 2;
+      this.cam.y = Number.isFinite(sim.homeY) ? sim.homeY : (sim.h * sim.tile) / 2;
+    }
     const { w, h } = this.viewSize();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
     this.drawSky(ctx, sim, w, h, time);
     this.ensureTerrain(sim);
+    if (!this.terrain) return;
 
-    const z = this.cam.zoom;
+    const z = this.cam.zoom || 2.2;
     // Snap camera to whole pixels for stable pixel art
     const cx = Math.round(this.cam.x * z) / z;
     const cy = Math.round(this.cam.y * z) / z;
@@ -388,14 +396,16 @@ export class Renderer {
   ensureTerrain(sim) {
     const pw = sim.w * sim.tile;
     const ph = sim.h * sim.tile;
-    if (!this.terrain) {
+    if (!this.terrain || this.terrain.width !== pw || this.terrain.height !== ph) {
       this.terrain = document.createElement("canvas");
       this.terrain.width = pw;
       this.terrain.height = ph;
+      this.terrainRev = -1;
     }
     if (this.terrainRev === sim.terrainRev) return;
     this.terrainRev = sim.terrainRev;
     const c = this.terrain.getContext("2d");
+    if (!c) return;
     c.imageSmoothingEnabled = false;
     const winter = sim.seasonIndex === 3;
     const autumn = sim.seasonIndex === 2;
@@ -405,6 +415,11 @@ export class Renderer {
         const tile = sim.getTile(tx, ty);
         const x = tx * sim.tile;
         const y = ty * sim.tile;
+        if (!tile) {
+          c.fillStyle = "#2a3828";
+          c.fillRect(x, y, sim.tile, sim.tile);
+          continue;
+        }
         const n = sim.randAt(tx, ty);
         let base = "#4d8f3f";
         if (tile.type === "water") base = n > 0.5 ? "#1d6d99" : "#185a86";
@@ -1213,9 +1228,9 @@ export class Renderer {
   drawNight(ctx, sim) {
     const t = sim.dayT;
     let dark = 0;
-    if (t >= 0.78) dark = Math.min(0.62, (t - 0.78) / 0.12 * 0.62);
-    else if (t < 0.1) dark = (1 - t / 0.1) * 0.55;
-    else if (t > 0.64 && t < 0.78) dark = ((t - 0.64) / 0.14) * 0.28;
+    if (t >= 0.78) dark = Math.min(0.48, (t - 0.78) / 0.12 * 0.48);
+    else if (t < 0.1) dark = (1 - t / 0.1) * 0.42;
+    else if (t > 0.64 && t < 0.78) dark = ((t - 0.64) / 0.14) * 0.22;
     const { w, h } = this.viewSize();
     const x0 = this.cam.x - w / 2 / this.cam.zoom;
     const y0 = this.cam.y - h / 2 / this.cam.zoom;

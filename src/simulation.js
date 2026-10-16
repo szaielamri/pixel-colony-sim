@@ -271,7 +271,7 @@ export class Simulation {
 
   getTile(tx, ty) {
     if (!this.inBounds(tx, ty)) return null;
-    return this.tiles[this.idx(tx, ty)];
+    return this.tiles[this.idx(tx, ty)] || null;
   }
 
   worldToTile(x, y) {
@@ -3495,17 +3495,34 @@ export class Simulation {
         growth: row[5] || 0, nearWater: !!row[6], burned: row[7] || 0, wear: 0, regrow: 0, moist: 0.5
       });
     }
-    if (!sim.tiles.length) {
-      Object.assign(sim, new Simulation());
-      return sim;
+    const need = sim.w * sim.h;
+    if (sim.tiles.length !== need) {
+      // Corrupt / truncated save — start a fresh world instead of a black void
+      return new Simulation();
     }
     for (const raw of data.villagers || []) {
-      const v = new Villager({ ...raw, iqScaled: true });
-      v.affinity = new Map(raw.affinity || []);
-      v.tags = new Map(raw.tags || []);
-      v.job = null;
-      v.path = null;
-      sim.addVillager(v);
+      try {
+        const v = new Villager({ ...raw, iqScaled: true });
+        const aff = Array.isArray(raw.affinity) ? raw.affinity : [];
+        const tags = Array.isArray(raw.tags) ? raw.tags : [];
+        v.affinity = new Map(aff);
+        v.tags = new Map(tags);
+        v.job = null;
+        v.path = null;
+        sim.addVillager(v);
+      } catch (_) {
+        /* skip broken villager rows */
+      }
+    }
+    if (!Number.isFinite(sim.homeX) || !Number.isFinite(sim.homeY) || (sim.homeX === 0 && sim.homeY === 0 && sim.tribes[0])) {
+      const t = sim.tribes[0];
+      if (t && Number.isFinite(t.homeX)) {
+        sim.homeX = t.homeX;
+        sim.homeY = t.homeY;
+      } else {
+        sim.homeX = (sim.w * sim.tile) / 2;
+        sim.homeY = (sim.h * sim.tile) / 2;
+      }
     }
     return sim;
   }
